@@ -73,7 +73,7 @@
 Mac 按 `Cmd+空格` 搜索"终端"，输入：
 
 ```bash
-cd ~/Desktop/26大创/小鲸OrcaAI
+cd ~“文件位置”
 ```
 
 ### 第二步：启动（一条命令搞定一切）
@@ -107,7 +107,7 @@ bash run.sh
 ### 1. 启动后端
 
 ```bash
-cd ~/Desktop/26大创/小鲸OrcaAI
+cd ~“文件位置”
 bash run.sh
 ```
 
@@ -364,8 +364,8 @@ v0.2.0 — 完整功能版
 
 ## 负责人
 
-廖博文 · 上海海事大学 数学系
+Brendan Liao
 
 ---
 
-*本文档为新手友好版，循序渐进带你了解整个项目。如果你有编程基础，可以直接看 `http://localhost:8000/docs` 的 API 文档。*
+*如果你有编程基础，可以直接看 `http://localhost:8000/docs` 的 API 文档。*
