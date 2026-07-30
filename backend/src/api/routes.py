@@ -42,8 +42,11 @@ class DocumentListResponse(BaseModel):
 async def upload_document(request: UploadRequest, user: User | None = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     try:
         if request.url:
-            title, content = document_processor.fetch_webpage(request.url)
-            source_type = "web"
+            # 通过采集器注册表选择合适的采集器(公众号链接会走专用采集器,见 ADR-0004)
+            from ..collectors import collect as collect_source
+            raw = collect_source(request.url)
+            title, content = raw.title, raw.content
+            source_type = raw.source_type
             doc_id = document_processor.generate_doc_id(url=request.url)
         elif request.content:
             content = request.content
@@ -153,14 +156,9 @@ class TagsResponse(BaseModel):
 
 @router.get("/tags", response_model=TagsResponse)
 async def get_tags():
-    import yaml
-    from ..core.config import settings
-    with open(settings.tags_config_path, "r", encoding="utf-8") as f:
-        tag_config = yaml.safe_load(f)
-    dimensions = {}
-    for dim in tag_config.get("dimensions", []):
-        dimensions[dim["name"]] = {"display_name": dim["display_name"], "values": dim["values"]}
-    return TagsResponse(dimensions=dimensions)
+    """返回当前领域包的标签维度(见 ADR-0003)。"""
+    from ..domains import get_active_domain
+    return TagsResponse(dimensions=get_active_domain().dimensions_as_dict())
 
 
 # ── 搜索 ──
@@ -226,6 +224,6 @@ async def get_status():
     return {
         "status": "running",
         "document_count": chroma_store.get_document_count(),
-        "version": "0.2.0",
+        "version": "0.3.0",
         "name": "小鲸OrcaAI",
     }

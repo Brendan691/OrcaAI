@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "小鲸OrcaAI - 海事知识收藏",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "一键收藏网页到海事知识库，AI自动分类，智能问答。支持 Chrome 和 Edge 浏览器。",
   "permissions": [
     "activeTab",

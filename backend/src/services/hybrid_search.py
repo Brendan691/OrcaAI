@@ -279,23 +279,42 @@ class HybridSearch:
 
         return total_ndcg / len(queries) if queries else 0.0
 
+    # 英文停用词
+    _STOPWORDS_EN = {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "of", "to", "in", "on", "and", "or", "for", "with",
+    }
+    # 中文单字停用词(bigram 里若两字都是停用词则丢弃)
+    _STOPWORDS_ZH = set("的了在是我有和就不人都一上也很到说要去你会着看好这那吗呢吧啊哦嗯")
+
     @staticmethod
     def _tokenize(text: str) -> List[str]:
-        """简单分词：去除停用词，保留中文和英文词汇"""
-        # 常见停用词
-        stopwords = {
-            "的", "了", "在", "是", "我", "有", "和", "就", "不", "人",
-            "都", "一", "一个", "上", "也", "很", "到", "说", "要", "去",
-            "你", "会", "着", "没有", "看", "好", "自己", "这", "那", "吗",
-            "呢", "吧", "啊", "哦", "嗯", "the", "a", "an", "is", "are",
-            "was", "were", "be", "been", "being", "have", "has", "had",
-            "do", "does", "did", "will", "would", "could", "should",
-        }
+        """分词:英文按单词,中文按字符 bigram(二元组)。
 
-        # 匹配中文字符和英文单词
-        tokens = re.findall(r"[一-鿿]+|[a-zA-Z]+", text.lower())
-        # 过滤停用词和短词
-        tokens = [t for t in tokens if t not in stopwords and len(t) > 1]
+        中文不用词典分词(避免引入 jieba 依赖),改用相邻两字组合。
+        这样"集装箱运价"→集装/装箱/箱运/运价,能与正文中的相同片段重叠匹配,
+        让关键词维度对中文真正生效(此前整段中文被切成一个巨长 token,几乎无法命中)。
+        """
+        runs = re.findall(r"[一-鿿]+|[a-zA-Z]+", text.lower())
+        tokens: List[str] = []
+        for run in runs:
+            if run[0].isascii():
+                # 英文词:过滤停用词和单字母
+                if run not in HybridSearch._STOPWORDS_EN and len(run) > 1:
+                    tokens.append(run)
+            else:
+                # 中文:生成字符 bigram
+                if len(run) == 1:
+                    if run not in HybridSearch._STOPWORDS_ZH:
+                        tokens.append(run)
+                    continue
+                for i in range(len(run) - 1):
+                    bigram = run[i:i + 2]
+                    # 两字都是停用词才丢弃
+                    if not (bigram[0] in HybridSearch._STOPWORDS_ZH
+                            and bigram[1] in HybridSearch._STOPWORDS_ZH):
+                        tokens.append(bigram)
         return tokens
 
 
