@@ -111,7 +111,7 @@ with st.sidebar:
         st.error("🔴 后端未连接\n\n请在项目根目录运行 `bash run.sh` 启动")
 
     st.caption(f"API: {get_api_base()}")
-    st.caption("v0.2.0 | Made with ❤️")
+    st.caption("v0.3.0 | Made with ❤️")
 
 # ============================================================
 # 页面 1：系统概览
@@ -454,5 +454,5 @@ elif page == "⚙️ 设置":
 
     **技术栈：** FastAPI + Chroma + 通义千问 + Streamlit
 
-    **版本：** v0.2.0（MVP 内测版）
+    **版本：** v0.3.0（通用内核 + 领域包架构）
     """)

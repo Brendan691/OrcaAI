@@ -31,15 +31,17 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-v3"
     CHAT_MODEL: str = "qwen-max"
 
-    # ── 数据库 ──
-    DATABASE_URL: str = "postgresql+asyncpg://orcaai:orcaai@localhost:5432/orcaai"
-    DATABASE_URL_SYNC: str = "postgresql://orcaai:orcaai@localhost:5432/orcaai"
+    # ── 数据库(本地默认 SQLite;生产切 Postgres,见 ADR-0002)──
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/orca.db"
+    DATABASE_URL_SYNC: str = "sqlite:///./data/orca.db"
 
     # ── JWT ──
     JWT_SECRET: str = "change-me-to-a-random-secret-string"
     JWT_EXPIRE_MINUTES: int = 43200  # 30 days
 
-    # ── 文件存储 (MinIO) ──
+    # ── 文件存储(本地默认;生产切 MinIO/S3,见 ADR-0002)──
+    STORAGE_BACKEND: str = "local"  # local | minio
+    FILE_STORAGE_DIR: str = str(PROJECT_ROOT / "data" / "files")
     S3_ACCESS_KEY_ID: str = "orcaaiadmin"
     S3_SECRET_ACCESS_KEY: str = "orcaaiadmin"
     S3_ENDPOINT: str = "localhost:9000"
@@ -65,8 +67,14 @@ class Settings(BaseSettings):
     APP_DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8501,chrome-extension://*"
 
+    # ── 数据目录(SQLite / Chroma / 文件 都放这里,方便备份与 gitignore)──
+    DATA_DIR: str = str(PROJECT_ROOT / "data")
+
+    # ── 领域包(见 ADR-0003)──
+    ACTIVE_DOMAIN: str = "maritime"
+
     # ── Chroma ──
-    CHROMA_PERSIST_DIR: str = str(PROJECT_ROOT / "chroma_db")
+    CHROMA_PERSIST_DIR: str = str(PROJECT_ROOT / "data" / "chroma")
 
     # ── 日志 ──
     LOG_LEVEL: str = "INFO"
@@ -107,10 +115,6 @@ class Settings(BaseSettings):
         if self.APP_DEBUG:
             origins.append("*")
         return origins
-
-    @property
-    def tags_config_path(self) -> Path:
-        return PROJECT_ROOT / "config" / "tags.yaml"
 
     @property
     def has_api_key(self) -> bool:

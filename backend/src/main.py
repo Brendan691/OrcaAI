@@ -1,4 +1,4 @@
-"""小鲸 OrcaAI v0.2.0 — FastAPI 主入口"""
+"""小鲸 OrcaAI v0.3.0 — FastAPI 主入口"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,8 +11,11 @@ from .api.auth import router as auth_router
 from .api.files import router as files_router
 from .api.teams import router as teams_router
 from .api.generate import router as generate_router
-from .api.wechat import router as wechat_router
-from .api.search import router as search_router
+
+# 以下功能已实现但暂挪到路线图(见 ROADMAP.md),默认不启用:
+#   - api.search  联网搜索(依赖 SearXNG)
+#   - api.wechat  微信公众号接入(依赖公网+已认证公众号)
+# 需要时取消注释并注册即可,代码文件保留在仓库中。
 
 
 @asynccontextmanager
@@ -24,7 +27,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="小鲸 OrcaAI",
     description="AI 驱动的一站式海事知识管理工具 — 收集、整理、应用、分享",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -36,20 +39,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(documents_router)
-app.include_router(auth_router)
-app.include_router(files_router)
-app.include_router(teams_router)
-app.include_router(generate_router)
-app.include_router(wechat_router)
-app.include_router(search_router)
+app.include_router(documents_router)  # ① 文档收藏/问答/搜索/标签
+app.include_router(auth_router)        # ④ 用户认证
+app.include_router(files_router)       # ② 文件上传
+app.include_router(teams_router)       # ⑤ 团队协作
+app.include_router(generate_router)    # ③ AI 报告生成
 
 
 @app.get("/")
 async def root():
     return {
         "name": "小鲸 OrcaAI",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "description": "AI 驱动的一站式海事知识管理工具",
         "docs": "/docs",
     }

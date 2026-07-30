@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 from openai import OpenAI
 
 from ..core.config import config
+from ..domains import get_active_domain
 from ..models.document import ChatRequest, ChatResponse
 from .embedding_service import embedding_service
 from .chroma_store import chroma_store
@@ -18,6 +19,8 @@ class RAGService:
         self._client = None
         self.model = config.CHAT_MODEL
         self.top_k = config.TOP_K
+        # 问答系统提示词来自当前领域包(见 ADR-0003)
+        self.qa_system_prompt = get_active_domain().qa_system_prompt
 
     @property
     def client(self):
@@ -64,8 +67,11 @@ class RAGService:
         # 5. 构建Prompt上下文
         context = self._build_context(top_results)
 
-        # 6. 调用LLM生成回答
-        answer = self._generate_answer(request.message, context)
+        # 6. 生成回答:有 key 调 LLM 生成;无 key 降级为返回检索片段(见 ADR-0007)
+        if config.has_api_key:
+            answer = self._generate_answer(request.message, context)
+        else:
+            answer = self._fallback_answer(top_results)
 
         # 7. 组装响应
         sources = [
@@ -153,17 +159,24 @@ class RAGService:
 
         return "\n".join(context_parts)
 
+    def _fallback_answer(self, results) -> str:
+        """无 API Key 时的降级回答:直接汇总检索到的相关片段。
+
+        这样在没有 LLM 的离线/演示环境下,问答仍能返回有用的检索结果,
+        只是没有 LLM 的归纳润色。配置 API Key 后自动切换为真实生成。
+        """
+        if not results:
+            return "知识库中暂未找到相关内容。"
+        lines = ["【未配置 LLM,以下为知识库检索到的相关片段】\n"]
+        for i, r in enumerate(results, 1):
+            snippet = r.content[:200] + ("..." if len(r.content) > 200 else "")
+            lines.append(f"{i}. {r.title}\n   {snippet}")
+        lines.append("\n提示:在 .env 填入 DASHSCOPE_API_KEY 后,可获得 AI 归纳的完整回答。")
+        return "\n".join(lines)
+
     def _generate_answer(self, question: str, context: str) -> str:
         """调用LLM生成回答"""
-        system_prompt = """你是一位专业的海事航运领域知识助手。请根据提供的参考资料回答用户问题。
-
-要求：
-1. 回答必须基于提供的参考资料，不要编造信息
-2. 如果参考资料不足以回答问题，请明确说明
-3. 回答要专业、准确、简洁
-4. 适当引用参考文档的编号，如"根据文档1..."
-5. 如果涉及多个方面，请分点说明
-"""
+        system_prompt = self.qa_system_prompt
 
         user_prompt = f"""参考资料：
 {context}

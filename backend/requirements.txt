@@ -1,68 +1,50 @@
-# Web framework
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-python-multipart==0.0.12
+# ============================================================
+# 小鲸 OrcaAI — 本地开发依赖(零外部服务,适配 Python 3.13)
+# 生产额外依赖见 requirements-prod.txt(见 docs/adr/0002)
+# 版本策略:此处声明兼容下限;装成功后用 pip freeze 生成
+#           requirements.lock 锁定精确版本(可复现)。
+# ============================================================
 
-# Database
-sqlalchemy[asyncio]==2.0.35
-asyncpg==0.29.0
-alembic==1.13.3
-psycopg2-binary==2.9.9
+# ---- Web 框架 ----
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.12
 
-# Vector database
-chromadb==0.5.20
+# ---- 数据库(本地默认 SQLite;生产切 Postgres 见 -prod)----
+sqlalchemy[asyncio]>=2.0.36
+aiosqlite>=0.20
 
-# AI / LLM
-openai==1.55.0
+# ---- 向量库 ----
+chromadb>=0.5.20
 
-# Auth
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+# ---- AI / LLM(通义千问,OpenAI 兼容协议)----
+openai>=1.55
 
-# File storage
-minio==7.2.7
+# ---- 认证 ----
+python-jose[cryptography]>=3.3
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0,<5
 
-# Full-text search
-meilisearch==0.43.0
+# ---- 文档解析(网页 + 轻量文件解析)----
+beautifulsoup4>=4.12
+lxml>=5.3
+pypdf>=5.0
+python-docx>=1.1
+python-pptx>=1.0
 
-# Document parsing
-beautifulsoup4==4.12.3
-lxml==5.3.0
-pypdf==5.0.1
-python-docx==1.1.2
-python-pptx==1.0.2
-openpyxl==3.1.5
-markitdown==0.0.1a3
-pydub==0.25.1
+# ---- 配置 / 校验 ----
+python-dotenv>=1.0
+pydantic>=2.10
+pydantic-settings>=2.6
+PyYAML>=6.0
 
-# Config & env
-python-dotenv==1.0.1
-pydantic==2.10.0
-pydantic-settings==2.6.0
-PyYAML==6.0.2
+# ---- HTTP ----
+requests>=2.32
+httpx>=0.27
 
-# Scientific
-numpy==1.26.4
-scikit-learn==1.5.2
-pandas==2.2.3
+# ---- 管理后台 ----
+streamlit>=1.40
 
-# HTTP & scraping
-requests==2.32.3
-httpx==0.27.2
-aiohttp==3.10.10
-
-# Utilities
-tenacity==9.0.0
-rich==13.9.0
-
-# Admin panel
-streamlit==1.40.0
-
-# WeChat SDK
-wechatpy==1.8.25
-
-# Testing
-pytest==8.3.3
-pytest-asyncio==0.24.0
-httpx==0.27.2
+# ---- 测试 ----
+pytest>=8.3
+pytest-asyncio>=0.24

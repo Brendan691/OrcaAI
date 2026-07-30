@@ -1,0 +1,21 @@
+# ============================================================
+# 小鲸 OrcaAI — 生产额外依赖(见 docs/adr/0002)
+# 用法:pip install -r requirements.txt -r requirements-prod.txt
+# 仅当切换到重型服务栈(docker-compose)时才需要。
+# ============================================================
+
+# ---- Postgres 驱动(替代本地 SQLite)----
+asyncpg>=0.29
+psycopg2-binary>=2.9
+
+# ---- 数据库迁移 ----
+alembic>=1.13
+
+# ---- 对象存储 MinIO / S3(替代本地文件夹)----
+minio>=7.2
+
+# ---- 全文检索 Meilisearch ----
+meilisearch>=0.31
+
+# ---- 重试 / 日志美化 ----
+tenacity>=9.0
