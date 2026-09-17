@@ -82,10 +82,10 @@ async def wechat_callback(request: Request):
 
     # 处理命令
     if content.startswith("/") or content.startswith("。"):
-        reply = _handle_command(content, from_user)
+        reply = await _handle_command(content, from_user)
     else:
         # 默认：知识库问答
-        reply = _handle_qa(content)
+        reply = await _handle_qa(content)
 
     return _build_text_reply(from_user, to_user, reply)
 
@@ -100,7 +100,7 @@ def _build_text_reply(to_user: str, from_user: str, content: str) -> str:
 </xml>"""
 
 
-def _handle_command(content: str, user_id: str) -> str:
+async def _handle_command(content: str, user_id: str) -> str:
     """处理用户命令"""
     content = content.lstrip("/。")
 
@@ -118,7 +118,7 @@ def _handle_command(content: str, user_id: str) -> str:
     if content.startswith("问答") or content.startswith("qa"):
         question = content.replace("问答", "").replace("qa", "").strip()
         if question:
-            return _handle_qa(question)
+            return await _handle_qa(question)
         return "请在 /问答 后输入你的问题。"
 
     if content in ("周报", "weekly"):
@@ -136,17 +136,17 @@ def _handle_command(content: str, user_id: str) -> str:
 置信度：{tags.confidence:.0%}"""
         return "请在 /标签 后输入需要分析的内容。"
 
-    return _handle_qa(content)
+    return await _handle_qa(content)
 
 
-def _handle_qa(question: str) -> str:
+async def _handle_qa(question: str) -> str:
     """知识库问答"""
     if not question.strip():
         return "请输入你的问题。"
 
     try:
         from ..models.document import ChatRequest
-        result = rag_service.chat(ChatRequest(message=question))
+        result = await rag_service.chat(ChatRequest(message=question))
 
         if result.confidence < 0.3:
             return f"{result.answer}\n\n⚠️ 知识库中相关度较低，建议补充相关资料后再提问。"
@@ -155,7 +155,7 @@ def _handle_qa(question: str) -> str:
         if result.sources:
             source_info = "\n\n📚 参考来源："
             for i, src in enumerate(result.sources[:3], 1):
-                source_info += f"\n{i}. {src.get('title', '未知')}"
+                source_info += f"\n{i}. {src.title}"
 
         return result.answer + source_info
     except Exception as e:

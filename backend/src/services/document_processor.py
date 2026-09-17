@@ -1,5 +1,6 @@
 """文档处理服务 - URL解析、PDF解析、文本切片"""
 import hashlib
+import json
 import re
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -27,6 +28,11 @@ class DocumentProcessor:
         Returns:
             (title, content) 元组
         """
+        title, text, _ = self.fetch_webpage_with_metadata(url)
+        return title, text
+
+    def fetch_webpage_with_metadata(self, url: str) -> tuple[str, str, dict]:
+        """抓取正文，并从结构化字段中提取可核验的来源发布日期。"""
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -62,7 +68,35 @@ class DocumentProcessor:
         # 清理文本
         text = self._clean_text(text)
 
-        return title, text
+        return title, text, {"published_at": self._extract_published_at(soup)}
+
+    @staticmethod
+    def _extract_published_at(soup: BeautifulSoup) -> str:
+        for attrs in (
+            {"property": "article:published_time"},
+            {"property": "og:published_time"},
+            {"name": "date"},
+            {"name": "publishdate"},
+            {"name": "pubdate"},
+        ):
+            element = soup.find("meta", attrs=attrs)
+            if element and element.get("content"):
+                return str(element["content"]).strip()
+
+        time_element = soup.find("time", attrs={"datetime": True})
+        if time_element:
+            return str(time_element["datetime"]).strip()
+
+        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+            try:
+                payload = json.loads(script.string or script.get_text() or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            records = payload if isinstance(payload, list) else [payload]
+            for record in records:
+                if isinstance(record, dict) and record.get("datePublished"):
+                    return str(record["datePublished"]).strip()
+        return ""
 
     def process_text(self, content: str, title: str = "") -> tuple[str, List[DocumentChunk]]:
         """处理纯文本内容
@@ -80,10 +114,12 @@ class DocumentProcessor:
 
     def _clean_text(self, text: str) -> str:
         """清理文本"""
-        # 移除多余空白
-        text = re.sub(r"\s+", " ", text)
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         # 移除特殊字符但保留中文标点
         text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+        # 合并横向空白，但保留换行作为引用定位依据
+        text = re.sub(r"[\t \f\v]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
         # 移除过多的换行
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
@@ -115,11 +151,18 @@ class DocumentProcessor:
                         end = start + len(chunk_text)
                         break
 
+            content = chunk_text.strip()
+            leading_trim = len(chunk_text) - len(chunk_text.lstrip())
+            actual_start = start + leading_trim
+            actual_end = actual_start + len(content)
+            end_for_line = max(actual_start, actual_end - 1)
             chunk = DocumentChunk(
                 chunk_id=f"chunk_{chunk_id}",
-                content=chunk_text.strip(),
-                start_idx=start,
-                end_idx=start + len(chunk_text),
+                content=content,
+                start_idx=actual_start,
+                end_idx=actual_end,
+                line_start=text.count("\n", 0, actual_start) + 1,
+                line_end=text.count("\n", 0, end_for_line) + 1,
             )
             chunks.append(chunk)
 

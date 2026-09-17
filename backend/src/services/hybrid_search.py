@@ -6,13 +6,35 @@
 import math
 import re
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 import numpy as np
 
 from ..core.config import config
-from ..models.document import DocumentTags, SearchResult
+from ..models.retrieval import DocumentTags, SearchResult
+
+
+@dataclass(frozen=True)
+class QueryProfile:
+    """查询意图与当前候选集共同决定的排序策略。"""
+
+    lexical_intent: float
+    freshness_intent: float
+    complexity: float
+    weights: Dict[str, float]
+    reliability: Dict[str, float]
+    diversity_weight: float
+
+
+@dataclass(frozen=True)
+class RankingDecision:
+    """排序结果及其可审计诊断信息。"""
+
+    results: List[SearchResult]
+    profile: QueryProfile
+    confidence: float
 
 
 class HybridSearch:
@@ -102,8 +124,8 @@ class HybridSearch:
         """
         try:
             doc_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            now = datetime.now()
-            days_diff = (now - doc_time).days
+            now = datetime.now(doc_time.tzinfo)
+            days_diff = max(0, (now - doc_time).days)
 
             # 半衰期：30天
             half_life = 30
@@ -111,6 +133,16 @@ class HybridSearch:
             return max(0.0, min(1.0, score))
         except Exception:
             return 0.5  # 默认中等得分
+
+    @staticmethod
+    def has_valid_timestamp(value: str) -> bool:
+        if not value:
+            return False
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return True
+        except (TypeError, ValueError):
+            return False
 
     def compute_tag_score(
         self,
@@ -177,6 +209,268 @@ class HybridSearch:
             self.tag_weight * tag_score
         )
         return total
+
+    def rank(
+        self,
+        hits: List[Dict[str, Any]],
+        query: str,
+        tag_filter: Optional[DocumentTags] = None,
+        top_k: int = 5,
+        diversify: bool = True,
+    ) -> RankingDecision:
+        """自适应地融合候选信号，并选择低冗余证据。
+
+        时间信号只读取来源发布日期 ``published_at``。入库时间不代表内容
+        新旧，因此不会被当作时效证据。
+        """
+        if not hits or top_k <= 0:
+            profile = self._build_query_profile(query, tag_filter, [])
+            return RankingDecision(results=[], profile=profile, confidence=0.0)
+
+        prepared: List[Dict[str, Any]] = []
+        for index, hit in enumerate(hits):
+            published_at = str(hit.get("published_at") or "")
+            tags = hit.get("tags", {})
+            prepared.append({
+                "index": index,
+                "hit": hit,
+                "vector": self.compute_vector_score(hit.get("distance", 0.5)),
+                "lexical": self.compute_keyword_score(query, hit.get("content", "")),
+                "temporal": self.compute_time_score(published_at),
+                "temporal_valid": self.has_valid_timestamp(published_at),
+                "tag": self.compute_tag_score(tag_filter, tags),
+            })
+
+        return self.rank_scored_candidates(
+            prepared,
+            query,
+            tag_filter=tag_filter,
+            top_k=top_k,
+            diversify=diversify,
+        )
+
+    def rank_scored_candidates(
+        self,
+        prepared: List[Dict[str, Any]],
+        query: str,
+        tag_filter: Optional[DocumentTags] = None,
+        top_k: int = 5,
+        diversify: bool = True,
+        adaptive: bool = True,
+        missingness_gate: bool = True,
+        rank_fusion_weight: float = 0.25,
+    ) -> RankingDecision:
+        """排序已计算四路信号的候选，供生产检索与离线实验共享。"""
+        if not prepared or top_k <= 0:
+            profile = self._build_query_profile(
+                query, tag_filter, [], adaptive=adaptive, missingness_gate=missingness_gate,
+            )
+            return RankingDecision(results=[], profile=profile, confidence=0.0)
+
+        profile = self._build_query_profile(
+            query,
+            tag_filter,
+            prepared,
+            adaptive=adaptive,
+            missingness_gate=missingness_gate,
+        )
+        rank_scores = self._weighted_rrf(prepared, profile.weights)
+        scored: List[SearchResult] = []
+        for item in prepared:
+            hit = item["hit"]
+            calibrated = sum(
+                profile.weights[name] * item[name]
+                for name in ("vector", "lexical", "temporal", "tag")
+            )
+            fusion_weight = min(1.0, max(0.0, rank_fusion_weight))
+            fused = (1.0 - fusion_weight) * calibrated + fusion_weight * rank_scores[item["index"]]
+            tags = hit.get("tags", {})
+            scored.append(
+                SearchResult(
+                    doc_id=hit.get("doc_id", ""),
+                    chunk_id=hit.get("chunk_id", ""),
+                    chunk_index=hit.get("chunk_index"),
+                    title=hit.get("title", ""),
+                    content=hit.get("content", ""),
+                    url=hit.get("url", ""),
+                    source_type=hit.get("source_type", ""),
+                    start_idx=hit.get("start_idx"),
+                    end_idx=hit.get("end_idx"),
+                    line_start=hit.get("line_start"),
+                    line_end=hit.get("line_end"),
+                    score=round(fused, 4),
+                    vector_score=round(item["vector"], 4),
+                    keyword_score=round(item["lexical"], 4),
+                    time_score=round(item["temporal"], 4) if item["temporal_valid"] else 0.0,
+                    tag_score=round(item["tag"], 4) if profile.weights["tag"] else 0.0,
+                    tags=DocumentTags(
+                        business_type=tags.get("business_type", []),
+                        geographic_region=tags.get("geographic_region", []),
+                        topic_category=tags.get("topic_category", []),
+                        event_nature=tags.get("event_nature", []),
+                    ),
+                )
+            )
+
+        scored.sort(key=lambda result: result.score, reverse=True)
+        selected = self._select_diverse(scored, top_k, profile.diversity_weight) if diversify else scored[:top_k]
+        return RankingDecision(
+            results=selected,
+            profile=profile,
+            confidence=self._retrieval_confidence(scored, profile),
+        )
+
+    def _build_query_profile(
+        self,
+        query: str,
+        tag_filter: Optional[DocumentTags],
+        prepared: List[Dict[str, Any]],
+        adaptive: bool = True,
+        missingness_gate: bool = True,
+    ) -> QueryProfile:
+        lower = query.lower()
+        cue_count = (
+            len(re.findall(r"\b[A-Z]{2,}(?:[- ][A-Z0-9]+)*\b", query))
+            + len(re.findall(r"\d+(?:[.-]\d+)*", query))
+            + len(re.findall(r"[\"'“”‘’][^\"'“”‘’]+[\"'“”‘’]", query))
+        )
+        semantic_cues = re.findall(
+            r"\b(?:why|how|impact|compare|relationship|challenge|effect)\b|为什么|如何|影响|比较|关系|原因|挑战",
+            lower,
+        )
+        lexical_intent = min(1.0, max(0.0, 0.25 + 0.16 * cue_count - 0.08 * len(semantic_cues)))
+        freshness_intent = 1.0 if re.search(
+            r"\b(?:latest|recent|current|today|this week|newest|202[4-9])\b|最新|近期|当前|今天|本周|刚刚|新规",
+            lower,
+        ) else 0.0
+        complexity_cues = re.findall(
+            r"\b(?:and|versus|vs|compare|across|between|because|while)\b|以及|并且|比较|分别|之间|原因|同时|综合",
+            lower,
+        )
+        complexity = min(1.0, len(complexity_cues) / 2.0)
+
+        temporal_coverage = (
+            sum(1 for item in prepared if item.get("temporal_valid")) / len(prepared)
+            if prepared else 0.0
+        )
+        tag_requested = bool(tag_filter and any((
+            tag_filter.business_type,
+            tag_filter.geographic_region,
+            tag_filter.topic_category,
+            tag_filter.event_nature,
+        )))
+        reliability = {
+            "vector": 1.0,
+            "lexical": 1.0,
+            "temporal": temporal_coverage if missingness_gate else 1.0,
+            "tag": 1.0 if tag_requested else 0.0,
+        }
+        if adaptive:
+            raw_weights = {
+                "vector": self.vector_weight * (1.25 - 0.45 * lexical_intent),
+                "lexical": self.keyword_weight * (1.0 + 1.8 * lexical_intent),
+                "temporal": self.time_weight * (0.15 + 2.85 * freshness_intent),
+                "tag": self.tag_weight * (2.5 if tag_requested else 0.0),
+            }
+        else:
+            raw_weights = {
+                "vector": self.vector_weight,
+                "lexical": self.keyword_weight,
+                "temporal": self.time_weight,
+                "tag": self.tag_weight if tag_requested else 0.0,
+            }
+        gated = {name: raw_weights[name] * reliability[name] for name in raw_weights}
+        total = sum(gated.values())
+        weights = (
+            {name: value / total for name, value in gated.items()}
+            if total > 0 else {"vector": 0.5, "lexical": 0.5, "temporal": 0.0, "tag": 0.0}
+        )
+        return QueryProfile(
+            lexical_intent=round(lexical_intent, 4),
+            freshness_intent=freshness_intent,
+            complexity=round(complexity, 4),
+            weights={name: round(value, 6) for name, value in weights.items()},
+            reliability={name: round(value, 6) for name, value in reliability.items()},
+            diversity_weight=round(0.12 + 0.16 * complexity, 4),
+        )
+
+    @staticmethod
+    def _weighted_rrf(
+        prepared: List[Dict[str, Any]],
+        weights: Dict[str, float],
+        rank_constant: int = 60,
+    ) -> Dict[int, float]:
+        fused = {item["index"]: 0.0 for item in prepared}
+        max_score = sum(weight / (rank_constant + 1) for weight in weights.values())
+        for signal, weight in weights.items():
+            if weight <= 0:
+                continue
+            eligible = [
+                item for item in prepared
+                if signal != "temporal" or item.get("temporal_valid")
+            ]
+            eligible.sort(key=lambda item: (item[signal], -item["index"]), reverse=True)
+            for rank, item in enumerate(eligible, start=1):
+                fused[item["index"]] += weight / (rank_constant + rank)
+        if max_score > 0:
+            fused = {index: min(1.0, value / max_score) for index, value in fused.items()}
+        return fused
+
+    def _select_diverse(
+        self,
+        ranked: List[SearchResult],
+        top_k: int,
+        diversity_weight: float,
+    ) -> List[SearchResult]:
+        if len(ranked) <= 1:
+            return ranked[:top_k]
+        selected = [ranked[0]]
+        remaining = ranked[1:]
+        while remaining and len(selected) < top_k:
+            best = max(
+                remaining,
+                key=lambda candidate: self._diversity_objective(
+                    candidate, selected, diversity_weight,
+                ),
+            )
+            selected.append(best)
+            remaining.remove(best)
+        return selected
+
+    def _diversity_objective(
+        self,
+        candidate: SearchResult,
+        selected: List[SearchResult],
+        diversity_weight: float,
+    ) -> float:
+        candidate_tokens = set(self._tokenize(candidate.content))
+        max_similarity = 0.0
+        same_document = False
+        for existing in selected:
+            existing_tokens = set(self._tokenize(existing.content))
+            union = candidate_tokens | existing_tokens
+            similarity = len(candidate_tokens & existing_tokens) / len(union) if union else 0.0
+            max_similarity = max(max_similarity, similarity)
+            same_document = same_document or bool(candidate.doc_id and candidate.doc_id == existing.doc_id)
+        redundancy_penalty = 0.08 if same_document else 0.0
+        return (
+            (1.0 - diversity_weight) * candidate.score
+            + diversity_weight * (1.0 - max_similarity)
+            - redundancy_penalty
+        )
+
+    @staticmethod
+    def _retrieval_confidence(ranked: List[SearchResult], profile: QueryProfile) -> float:
+        if not ranked:
+            return 0.0
+        top = ranked[0].score
+        margin = top - ranked[1].score if len(ranked) > 1 else top
+        reliability = sum(
+            profile.weights[name] * profile.reliability[name]
+            for name in profile.weights
+        )
+        confidence = 0.65 * top + 0.2 * min(1.0, max(0.0, margin) / 0.15) + 0.15 * reliability
+        return round(min(1.0, max(0.0, confidence)), 4)
 
     def optimize_weights(
         self,

@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     EMBEDDING_MODEL: str = "text-embedding-v3"
     CHAT_MODEL: str = "qwen-max"
+    RERANK_ENABLED: bool = True
+    RERANK_MODEL: str = "gte-rerank-v2"
+    DASHSCOPE_RERANK_ENDPOINT: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    RERANK_CANDIDATES: int = 10
+    RERANK_MAX_CHARACTERS: int = 1800
+    RERANK_TIMEOUT_SECONDS: float = 5.0
+    CARE_WEIGHT_LOW: float = 0.4
+    CARE_WEIGHT_SPAN: float = 0.8
 
     # ── 数据库(本地默认 SQLite;生产切 Postgres,见 ADR-0002)──
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/orca.db"
@@ -52,8 +60,11 @@ class Settings(BaseSettings):
     MEILI_HOST: str = "http://localhost:7700"
     MEILI_API_KEY: str = "orcaai-meili-key"
 
-    # ── 联网搜索 (SearXNG) ──
-    SEARXNG_BASE_URL: str = "http://localhost:8888"
+    # ── 联网搜索(Tavily 托管 API + Bing 降级)──
+    TAVILY_API_KEY: str = ""
+    TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_FALLBACK: bool = True
+    WEB_SEARCH_TIMEOUT: float = 15.0
 
     # ── 微信 ──
     WECHAT_APP_ID: str = ""
@@ -97,7 +108,10 @@ class Settings(BaseSettings):
     # ── 上传限制 ──
     MAX_UPLOAD_SIZE_MB: int = 50
 
-    @field_validator("APP_PORT", "RATE_LIMIT_PER_MINUTE", "CHUNK_SIZE", "CHUNK_OVERLAP", "TOP_K", mode="before")
+    @field_validator(
+        "APP_PORT", "RATE_LIMIT_PER_MINUTE", "CHUNK_SIZE", "CHUNK_OVERLAP", "TOP_K",
+        "RERANK_CANDIDATES", "RERANK_MAX_CHARACTERS", mode="before",
+    )
     @classmethod
     def validate_int(cls, v):
         try:

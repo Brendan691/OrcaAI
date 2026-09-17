@@ -1,13 +1,14 @@
 """文档数据模型 — 扩展支持用户/团队/文件"""
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.database import Base
+from .retrieval import DocumentTags, SearchResult
 
 
 # ── Pydantic schemas ──
@@ -17,14 +18,9 @@ class DocumentChunk(BaseModel):
     content: str = Field(..., description="切片内容")
     start_idx: int = Field(..., description="在原文档中的起始位置")
     end_idx: int = Field(..., description="在原文档中的结束位置")
-
-
-class DocumentTags(BaseModel):
-    business_type: List[str] = Field(default=[], description="业务类型")
-    geographic_region: List[str] = Field(default=[], description="地理区域")
-    topic_category: List[str] = Field(default=[], description="主题类别")
-    event_nature: List[str] = Field(default=[], description="事件性质")
-    confidence: float = Field(default=0.0, description="分类置信度")
+    line_start: int = Field(..., description="在原文档中的起始行")
+    line_end: int = Field(..., description="在原文档中的结束行")
+    page_number: Optional[int] = Field(default=None, description="原始文件页码")
 
 
 class MaritimeDocument(BaseModel):
@@ -47,22 +43,54 @@ class ChatRequest(BaseModel):
     search_internet: bool = Field(default=False, description="是否同时搜索互联网")
 
 
+class Citation(BaseModel):
+    id: str = Field(..., description="稳定引用ID")
+    index: int = Field(..., description="回答中的角标序号")
+    cite_marker: str = Field(..., description="模型必须原样使用的引用角标")
+    source_type: Literal["knowledge", "web"]
+    title: str
+    snippet: str = ""
+    url: str = ""
+    doc_id: str = ""
+    chunk_id: str = ""
+    chunk_index: Optional[int] = None
+    start_idx: Optional[int] = None
+    end_idx: Optional[int] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    locator_label: str = ""
+    provider: str = ""
+    score: Optional[float] = None
+
+
 class ChatResponse(BaseModel):
     answer: str = Field(..., description="AI回答")
-    sources: List[dict] = Field(default=[])
+    sources: List[Citation] = Field(default_factory=list)
     confidence: float = Field(default=0.0)
+    search_status: Literal["disabled", "ok", "degraded", "failed"] = "disabled"
+    search_message: str = ""
 
 
-class SearchResult(BaseModel):
-    doc_id: str = Field(..., description="文档ID")
-    title: str = Field(..., description="文档标题")
-    content: str = Field(..., description="匹配内容片段")
-    score: float = Field(..., description="综合得分")
-    vector_score: float = Field(default=0.0)
-    keyword_score: float = Field(default=0.0)
-    time_score: float = Field(default=0.0)
-    tag_score: float = Field(default=0.0)
-    tags: DocumentTags = Field(default_factory=DocumentTags)
+class WebSearchResult(BaseModel):
+    title: str
+    url: str
+    snippet: str = ""
+    provider: str
+    score: Optional[float] = None
+    published_at: Optional[str] = None
+
+
+class SearchWarning(BaseModel):
+    code: str
+    message: str
+    provider: str = ""
+
+
+class SearchOutcome(BaseModel):
+    status: Literal["ok", "degraded", "failed"]
+    provider: str = ""
+    results: List[WebSearchResult] = Field(default_factory=list)
+    warnings: List[SearchWarning] = Field(default_factory=list)
 
 
 class UploadRequest(BaseModel):
@@ -82,6 +110,7 @@ class ReportGenerateRequest(BaseModel):
     report_type: str = Field(..., description="报告类型: weekly_shipping/risk_alert/convention_update")
     time_range: Optional[str] = Field(default="week", description="时间范围: week/month/quarter")
     topic_filter: Optional[str] = Field(default=None, description="主题过滤")
+    search_internet: bool = Field(default=False, description="是否联网搜索补充素材")
 
 
 class ReportGenerateResponse(BaseModel):

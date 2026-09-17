@@ -7,7 +7,7 @@ import chromadb
 from chromadb.config import Settings
 
 from ..core.config import config
-from ..models.document import DocumentTags, MaritimeDocument
+from ..models.document import DocumentChunk, DocumentTags, MaritimeDocument
 
 
 class ChromaStore:
@@ -27,7 +27,7 @@ class ChromaStore:
     def add_document(
         self,
         doc_id: str,
-        chunks: List[str],
+        chunks: List[DocumentChunk],
         embeddings: List[List[float]],
         metadata: Dict[str, Any],
     ) -> bool:
@@ -54,10 +54,15 @@ class ChromaStore:
             chunk_meta = {
                 "doc_id": doc_id,
                 "chunk_index": i,
+                "start_idx": chunks[i].start_idx,
+                "end_idx": chunks[i].end_idx,
+                "line_start": chunks[i].line_start,
+                "line_end": chunks[i].line_end,
                 "title": metadata.get("title", ""),
                 "url": metadata.get("url", ""),
                 "source_type": metadata.get("source_type", "web"),
                 "created_at": metadata.get("created_at", datetime.now().isoformat()),
+                "published_at": metadata.get("published_at", ""),
                 # 标签序列化为JSON字符串
                 "tags_business": json.dumps(metadata.get("tags", {}).get("business_type", [])),
                 "tags_geo": json.dumps(metadata.get("tags", {}).get("geographic_region", [])),
@@ -68,7 +73,7 @@ class ChromaStore:
 
         self.collection.add(
             ids=chunk_ids,
-            documents=chunks,
+            documents=[chunk.content for chunk in chunks],
             embeddings=embeddings,
             metadatas=metadatas,
         )
@@ -107,12 +112,19 @@ class ChromaStore:
             for i, chunk_id in enumerate(results["ids"][0]):
                 hit = {
                     "chunk_id": chunk_id,
+                    "chunk_index": results["metadatas"][0][i].get("chunk_index"),
                     "doc_id": results["metadatas"][0][i].get("doc_id", ""),
                     "content": results["documents"][0][i],
                     "title": results["metadatas"][0][i].get("title", ""),
                     "url": results["metadatas"][0][i].get("url", ""),
+                    "source_type": results["metadatas"][0][i].get("source_type", ""),
+                    "start_idx": results["metadatas"][0][i].get("start_idx"),
+                    "end_idx": results["metadatas"][0][i].get("end_idx"),
+                    "line_start": results["metadatas"][0][i].get("line_start"),
+                    "line_end": results["metadatas"][0][i].get("line_end"),
                     "distance": results["distances"][0][i],
                     "created_at": results["metadatas"][0][i].get("created_at", ""),
+                    "published_at": results["metadatas"][0][i].get("published_at", ""),
                     "tags": {
                         "business_type": json.loads(results["metadatas"][0][i].get("tags_business", "[]")),
                         "geographic_region": json.loads(results["metadatas"][0][i].get("tags_geo", "[]")),
@@ -148,6 +160,7 @@ class ChromaStore:
                         "url": meta.get("url", ""),
                         "source_type": meta.get("source_type", ""),
                         "created_at": meta.get("created_at", ""),
+                        "published_at": meta.get("published_at", ""),
                         "tags": {
                             "business_type": json.loads(meta.get("tags_business", "[]")),
                             "geographic_region": json.loads(meta.get("tags_geo", "[]")),

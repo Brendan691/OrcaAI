@@ -18,7 +18,7 @@
 1. **一键收藏**:浏览网页时点一下,自动抓取正文存入知识库(公众号文章有专用采集器)。
 2. **AI 自动打标签**:按领域标签体系自动分类,无需手动整理。
 3. **智能问答**:用自然语言提问,AI 基于你收藏的内容回答(RAG,有出处、不瞎编)。
-4. **混合检索**:向量语义 + 关键词 + 时间 + 标签四维加权,检索更准。
+4. **自适应检索**:AEF 动态融合向量、关键词、来源时间和标签；配置 Key 后 CARE 再用专用 cross-encoder 按查询置信度重排,异常自动回退。
 
 **适用场景:** 写论文找资料、行业调研、追踪动态、整理专业知识。
 
@@ -33,14 +33,14 @@
  文件上传    ─┼─▶ 采集器 Collector ─▶ 切片 ─▶ 向量化 ─▶ 知识库          ┌──────────────┐
  粘贴文本    ─┘   (网页/公众号/文件)              (Chroma+SQLite)      │ maritime     │
                                                        │              │ 航运领域包    │
- Streamlit ◀── RAG 问答 / 混合检索 ◀──────────────────┴──────────────│ ·四维标签     │
-  管理后台        │                                                   │ ·分类提示词   │
+ Next.js ◀── RAG 问答 / 自适应证据融合 ◀─────────────┴──────────────│ ·四维标签     │
+  Web 前端        │                                                   │ ·分类提示词   │
                  └─▶ 报告生成(周报/风险预警/公约解读)◀───────────────│ ·报告模板     │
                                                                      └──────────────┘
                         LLM:通义千问(打标签 / 向量化 / 问答 / 生成)
 ```
 
-- **通用内核**:采集、切片、向量化、知识库、混合检索、RAG —— 不含任何"航运"字样。
+- **通用内核**:采集、切片、向量化、知识库、自适应证据融合、RAG —— 不含任何"航运"字样。
 - **领域包** `backend/src/domains/maritime/`:标签体系、提示词、报告模板。换包即换行业(见 `domains/example/` 空模板)。
 
 ---
@@ -51,6 +51,7 @@
 | 需要 | 说明 |
 |------|------|
 | Python 3.10+ | 本机已用 3.13 验证 |
+| Node.js 18+ | 前端需要(本机已用 24.15 验证) |
 | 通义千问 API Key | [百炼控制台](https://help.aliyun.com/zh/model-studio/models) 申请,新用户有免费额度。**没有也能启动**(走离线降级) |
 | Chrome | 装插件用 |
 
@@ -60,11 +61,11 @@
 # 1. 进入项目
 cd 小鲸OrcaAI
 
-# 2. 一键启动(自动建虚拟环境、装依赖、起服务)
+# 2. 一键启动(后端 + Next.js 前端)
 bash run.sh
 
-# 3. 浏览器打开管理后台
-#    http://localhost:8501
+# 3. 浏览器自动打开,或手动访问
+#    http://localhost:3000
 ```
 
 首次运行会生成 `.env`。填入 `DASHSCOPE_API_KEY` 后重跑即可获得完整 AI 能力;
@@ -105,17 +106,24 @@ bash run.sh
 │   │       └── maritime/       tags.yaml + prompts + keywords + reports
 │   ├── tests/                  测试(42 项,无需 API Key)
 │   └── requirements.txt        本地依赖(生产额外依赖见 requirements-prod.txt)
-├── admin/app.py                Streamlit 管理后台
+├── web/                        ★ Next.js 前端(专业现代界面)
+│   ├── src/
+│   │   ├── app/                6 个页面(概览/文档/搜索/问答/报告/设置)
+│   │   ├── components/         UI 组件(sidebar/tag-list/shadcn-ui)
+│   │   └── lib/                API 客户端 + 工具函数
+│   └── package.json            前端依赖(Next.js 16 + React 19 + Tailwind v4)
 ├── extension/                  Chrome 插件(MV3)
+│   ├── manifest.json           插件配置
+│   ├── popup.html/js           弹窗(收藏+问答)
+│   └── content.js              网页抓取
 ├── docs/
-│   ├── adr/                    架构决策记录(为什么这么设计)
-│   └── guide/                  从零学起的技术指南
-├── CONTEXT.md                  领域语言词汇表
-├── ROADMAP.md                  路线图(多平台采集等)
-├── docker-compose.yml          生产部署(Postgres/MinIO 等,见 ADR-0002)
-└── run.sh                      一键启动脚本
-```
-
+│   ├── adr/                    ★ 架构决策记录(0001-0008,记录所有设计理由)
+│   ├── guide/                  从 Python 语法讲起的技术指南(新手入门)
+│   └── demo-script.md          5 分钟答辩演示脚本
+├── CONTEXT.md                  领域词汇表(RAG/向量/领域包/采集器等术语)
+├── ROADMAP.md                  路线图(多平台采集愿景)
+├── CHANGELOG.md                更新日志
+└── run.sh                      一键启动/停止/状态
 ---
 
 ## 技术栈
@@ -126,7 +134,7 @@ bash run.sh
 | 元数据库 | SQLite(异步 SQLAlchemy) | 用户/团队/文档记录。生产可切 Postgres |
 | 向量库 | Chroma | 语义检索 |
 | LLM | 通义千问(OpenAI 兼容) | 打标签 / 向量化 / 问答 / 生成 |
-| 后台 | Streamlit | 纯 Python 管理界面 |
+| 前端 | Next.js 16 + React 19 | 文档、检索、问答和报告界面 |
 | 插件 | Chrome Extension MV3 | 一键收藏 |
 
 ---
@@ -168,4 +176,3 @@ docker-compose up -d
 Brendan Liao · 大创项目
 
 *有编程基础可直接看 `http://localhost:8000/docs` 的交互式 API 文档。*
-

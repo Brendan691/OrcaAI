@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.config import config
 from ..core.database import get_db
 from ..core.security import get_current_user
 from ..models.document import (
@@ -26,7 +27,6 @@ from ..services.embedding_service import embedding_service
 from ..services.tag_classifier import tag_classifier
 from ..services.chroma_store import chroma_store
 from ..services.rag_service import rag_service
-from ..services.search_service import search_service
 
 router = APIRouter(prefix="/api", tags=["小鲸OrcaAI API"])
 
@@ -67,6 +67,7 @@ async def upload_document(request: UploadRequest, user: User | None = Depends(ge
             "url": request.url or "",
             "source_type": source_type,
             "created_at": datetime.now().isoformat(),
+            "published_at": raw.extra.get("published_at", "") if request.url else "",
             "tags": {
                 "business_type": tags.business_type,
                 "geographic_region": tags.geographic_region,
@@ -75,7 +76,7 @@ async def upload_document(request: UploadRequest, user: User | None = Depends(ge
             },
         }
 
-        chroma_store.add_document(doc_id=doc_id, chunks=chunk_texts, embeddings=embeddings, metadata=metadata)
+        chroma_store.add_document(doc_id=doc_id, chunks=chunks, embeddings=embeddings, metadata=metadata)
 
         # 存入 PostgreSQL
         from ..models.document import Document
@@ -126,23 +127,7 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     try:
-        result = rag_service.chat(request)
-
-        # 如果要求联网搜索，追加互联网结果
-        if request.search_internet:
-            internet_ctx = await search_service.search_and_format(request.message, num=3)
-            if internet_ctx and result.confidence < 0.7:
-                enhanced = rag_service._generate_answer(
-                    request.message,
-                    rag_service._build_context(rag_service._rerank(
-                        chroma_store.search(embedding_service.embed_text(request.message), top_k=5),
-                        request.message, None,
-                    )[:3]) + f"\n\n{internet_ctx}"
-                )
-                result.answer = enhanced
-                result.confidence = min(result.confidence + 0.2, 1.0)
-
-        return result
+        return await rag_service.chat(request)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"问答失败: {str(e)}")
@@ -179,37 +164,35 @@ class SearchResponse(BaseModel):
 async def search(request: SearchRequest):
     try:
         query_embedding = embedding_service.embed_text(request.query)
-        hits = chroma_store.search(query_embedding=query_embedding, top_k=request.top_k * 3, doc_filter=request.doc_filter)
+        hits = chroma_store.search(
+            query_embedding=query_embedding,
+            top_k=max(request.top_k * 3, config.RERANK_CANDIDATES),
+            doc_filter=request.doc_filter,
+        )
 
         if not hits:
             return SearchResponse(results=[], total=0)
 
         from ..services.hybrid_search import hybrid_search
+        from ..services.care_reranker import care_reranker
 
+        ranking = hybrid_search.rank(
+            hits,
+            request.query,
+            request.tag_filter,
+            top_k=max(request.top_k, config.RERANK_CANDIDATES),
+        )
+        care = await care_reranker.rerank(request.query, ranking.results, top_k=request.top_k)
         results = []
-        for hit in hits:
-            vector_score = hybrid_search.compute_vector_score(hit.get("distance", 0.5))
-            keyword_score = hybrid_search.compute_keyword_score(request.query, hit.get("content", ""))
-            time_score = hybrid_search.compute_time_score(hit.get("created_at", ""))
-            tag_score = hybrid_search.compute_tag_score(request.tag_filter, hit.get("tags", {}))
-
-            fused = hybrid_search.fuse_scores(vector_score, keyword_score, time_score, tag_score)
-
-            results.append({
-                "doc_id": hit.get("doc_id", ""),
-                "title": hit.get("title", ""),
-                "content": hit.get("content", "")[:300] + "...",
-                "url": hit.get("url", ""),
-                "score": round(fused, 4),
-                "vector_score": round(vector_score, 4),
-                "keyword_score": round(keyword_score, 4),
-                "time_score": round(time_score, 4),
-                "tag_score": round(tag_score, 4),
-                "tags": hit.get("tags", {}),
-            })
-
-        results.sort(key=lambda x: x["score"], reverse=True)
-        results = results[:request.top_k]
+        for result in care.results:
+            item = result.model_dump()
+            item["content"] = result.content[:300] + ("..." if len(result.content) > 300 else "")
+            item["retrieval_confidence"] = ranking.confidence
+            item["adaptive_weights"] = ranking.profile.weights
+            item["signal_reliability"] = ranking.profile.reliability
+            item["care_rerank_used"] = care.used
+            item["care_weight"] = care.weight
+            results.append(item)
 
         return SearchResponse(results=results, total=len(results))
     except Exception as e:
@@ -224,6 +207,6 @@ async def get_status():
     return {
         "status": "running",
         "document_count": chroma_store.get_document_count(),
-        "version": "0.3.0",
+        "version": "0.4.0",
         "name": "小鲸OrcaAI",
     }

@@ -26,8 +26,14 @@ class WebCollector:
         return source.startswith("http://") or source.startswith("https://")
 
     def collect(self, source: str) -> RawDocument:
-        title, content = document_processor.fetch_webpage(source)
-        return RawDocument(title=title, content=content, source_url=source, source_type="web")
+        title, content, metadata = document_processor.fetch_webpage_with_metadata(source)
+        return RawDocument(
+            title=title,
+            content=content,
+            source_url=source,
+            source_type="web",
+            extra=metadata,
+        )
 
 
 class WechatArticleCollector:

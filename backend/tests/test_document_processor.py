@@ -75,3 +75,22 @@ class TestDocumentProcessor:
             assert len(chunk.content) > 0
             # 不超过 chunk_size + 一些容差
             assert len(chunk.content) <= self.processor.chunk_size + 100
+
+    def test_process_text_preserves_lines_and_chunk_locators(self):
+        content = "第一行。\n第二行包含航运信息。\n第三行。"
+
+        full_text, chunks = self.processor.process_text(content)
+
+        assert full_text.count("\n") == 2
+        assert chunks[0].line_start == 1
+        assert chunks[0].line_end == 3
+
+    def test_extracts_structured_publication_date(self):
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(
+            '<html><head><meta property="article:published_time" content="2026-08-20T09:30:00+08:00"></head></html>',
+            "html.parser",
+        )
+
+        assert self.processor._extract_published_at(soup) == "2026-08-20T09:30:00+08:00"

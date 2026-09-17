@@ -1,6 +1,7 @@
 """测试混合相似度检索 - 核心创新模块"""
 import pytest
 import math
+from datetime import datetime, timedelta
 from src.services.hybrid_search import HybridSearch
 from src.models.document import DocumentTags
 
@@ -103,6 +104,79 @@ class TestHybridSearch:
         total = (self.hs.vector_weight + self.hs.keyword_weight +
                  self.hs.time_weight + self.hs.tag_weight)
         assert abs(total - 1.0) < 0.001
+
+    def test_adaptive_rank_disables_missing_temporal_signal(self):
+        decision = self.hs.rank(
+            [
+                {"doc_id": "a", "content": "latest container rate", "distance": 0.1, "tags": {}},
+                {"doc_id": "b", "content": "container market", "distance": 0.2, "tags": {}},
+            ],
+            "latest container rate",
+        )
+
+        assert decision.profile.freshness_intent == 1.0
+        assert decision.profile.reliability["temporal"] == 0.0
+        assert decision.profile.weights["temporal"] == 0.0
+
+    def test_adaptive_rank_uses_source_date_for_freshness_query(self):
+        decision = self.hs.rank(
+            [
+                {
+                    "doc_id": "recent",
+                    "content": "container rate outlook",
+                    "distance": 0.2,
+                    "published_at": datetime.now().isoformat(),
+                    "tags": {},
+                },
+                {
+                    "doc_id": "old",
+                    "content": "container rate outlook",
+                    "distance": 0.2,
+                    "published_at": (datetime.now() - timedelta(days=365)).isoformat(),
+                    "tags": {},
+                },
+            ],
+            "latest container rate outlook",
+        )
+
+        assert decision.profile.weights["temporal"] > 0.1
+        assert decision.results[0].doc_id == "recent"
+
+    def test_exact_query_increases_lexical_share(self):
+        exact = self.hs.rank(
+            [{"doc_id": "a", "content": "SOLAS XI-2", "distance": 0.1, "tags": {}}],
+            "SOLAS XI-2 requirements 2024",
+        )
+        semantic = self.hs.rank(
+            [{"doc_id": "a", "content": "port security rules", "distance": 0.1, "tags": {}}],
+            "How do port security rules affect implementation challenges?",
+        )
+
+        assert exact.profile.weights["lexical"] > semantic.profile.weights["lexical"]
+        assert exact.profile.weights["vector"] < semantic.profile.weights["vector"]
+
+    def test_tag_signal_is_gated_by_explicit_filter(self):
+        hits = [{"doc_id": "a", "content": "port", "distance": 0.1, "tags": {"topic_category": ["港口"]}}]
+        without_filter = self.hs.rank(hits, "port")
+        with_filter = self.hs.rank(
+            hits,
+            "port",
+            DocumentTags(topic_category=["港口"]),
+        )
+
+        assert without_filter.profile.weights["tag"] == 0.0
+        assert with_filter.profile.weights["tag"] > 0.0
+
+    def test_diverse_selection_avoids_adjacent_duplicate_chunks(self):
+        hits = [
+            {"doc_id": "same", "chunk_id": "1", "content": "集装箱运价持续上涨 港口拥堵", "distance": 0.01, "tags": {}},
+            {"doc_id": "same", "chunk_id": "2", "content": "集装箱运价持续上涨 港口拥堵严重", "distance": 0.02, "tags": {}},
+            {"doc_id": "other", "chunk_id": "3", "content": "红海绕航导致运输周期延长", "distance": 0.03, "tags": {}},
+        ]
+
+        decision = self.hs.rank(hits, "集装箱运价上涨和红海绕航", top_k=2)
+
+        assert {result.doc_id for result in decision.results} == {"same", "other"}
 
     @staticmethod
     def test_tokenize_chinese():

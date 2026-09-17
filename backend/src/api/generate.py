@@ -9,7 +9,11 @@ router = APIRouter(prefix="/api/generate", tags=["AI 内容生成"])
 
 @router.post("/report", response_model=ReportGenerateResponse)
 async def generate_report(req: ReportGenerateRequest):
-    result = await report_generator.generate(req.report_type, req.time_range or "week")
+    result = await report_generator.generate(
+        req.report_type,
+        req.time_range or "week",
+        req.search_internet
+    )
     if not result["success"]:
         raise HTTPException(400, result["content"])
     return ReportGenerateResponse(**result)

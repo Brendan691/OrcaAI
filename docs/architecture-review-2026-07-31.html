@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - OrcaAI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { border-style: dashed; }
+      .deep { border-width: 3px; border-color: #0f172a; }
+      .leak { color: #dc2626; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="mx-auto max-w-6xl space-y-12 px-5 py-10 sm:px-8">
+      <header class="border-b border-slate-300 pb-6">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500">Architecture Review</p>
+            <h1 class="mt-2 text-3xl font-semibold">小鲸 OrcaAI</h1>
+          </div>
+          <p class="text-sm text-slate-500">2026-07-31 · 对照 OmniBox</p>
+        </div>
+        <div class="mt-5 flex flex-wrap gap-4 text-xs text-slate-600">
+          <span><b class="inline-block h-3 w-3 border border-slate-600 bg-white"></b> module</span>
+          <span><b class="inline-block h-3 w-3 border border-dashed border-slate-600 bg-white"></b> seam</span>
+          <span><b class="inline-block h-3 w-3 bg-red-600"></b> leakage</span>
+          <span><b class="inline-block h-3 w-3 border-[3px] border-slate-900 bg-white"></b> deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+        <article id="ingestion" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-2xl font-semibold">1. 深化知识条目入库 module</h2>
+            <div class="flex gap-2 text-xs font-medium">
+              <span class="rounded bg-emerald-100 px-2 py-1 text-emerald-800">Strong</span>
+              <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">ports &amp; adapters</span>
+            </div>
+          </div>
+          <p class="mt-4 font-mono text-xs text-slate-600">api/routes.py · api/files.py · services/file_service.py · services/document_processor.py · services/chroma_store.py</p>
+          <div class="mt-6 grid gap-5 lg:grid-cols-2">
+            <div class="rounded border border-slate-200 bg-stone-50 p-4">
+              <p class="mb-3 text-xs uppercase tracking-wider text-slate-500">Before</p>
+              <pre class="mermaid">
+flowchart TD
+  U[URL route] --> P1[clean / chunk]
+  U --> T1[tag]
+  U --> E1[embed]
+  U --> C1[Chroma]
+  U --> S1[SQLite]
+  F[File route] --> X[parse to plain text]
+  F --> P2[clean / chunk]
+  F --> T2[tag]
+  F --> E2[embed]
+  F --> C2[Chroma]
+  F --> S2[SQLite]
+  X -. images / pages lost .-> L[No locator]
+  style L stroke:#dc2626,color:#dc2626
+              </pre>
+            </div>
+            <div class="rounded border-2 border-slate-900 bg-white p-4">
+              <p class="mb-3 text-xs uppercase tracking-wider text-slate-500">After</p>
+              <pre class="mermaid">
+flowchart TD
+  A[Collector adapters] --> I[Knowledge Entry Ingestion]
+  B[Parser adapters] --> I
+  I --> N[Markdown + assets + locators]
+  N --> K[Chunk / tag / embed]
+  K --> W[Atomic knowledge write]
+  W --> C[Chroma]
+  W --> S[SQLite]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class I deep
+              </pre>
+            </div>
+          </div>
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Problem</p><p class="mt-1 text-sm">两条 route 复制完整流程，纯文本解析丢失页码、图片、表格和媒体关联，双库写入也没有一致性。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Solution</p><p class="mt-1 text-sm">一个 deep module 接收标准知识条目；解析 adapter 输出 Markdown、资产和 locator，再统一切片与写库。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Wins</p><ul class="mt-1 list-disc pl-4 text-sm"><li>locality: 入库错误集中</li><li>leverage: 所有来源复用</li><li>interface 成为测试面</li></ul></div>
+          </div>
+          <div class="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">符合 ADR-0004；需要新增“结构化知识条目”领域词，并决定 Docling 云/本地成本。</div>
+        </article>
+
+        <article id="retrieval" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-2xl font-semibold">2. 合并检索上下文与引用 module</h2>
+            <div class="flex gap-2 text-xs font-medium">
+              <span class="rounded bg-emerald-100 px-2 py-1 text-emerald-800">Strong</span>
+              <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">in-process</span>
+            </div>
+          </div>
+          <p class="mt-4 font-mono text-xs text-slate-600">services/rag_service.py · services/search_service.py · api/routes.py · models/document.py · web/src/app/chat/page.tsx</p>
+          <div class="mt-6 grid gap-5 lg:grid-cols-2">
+            <div class="relative rounded border border-slate-200 bg-stone-50 p-5">
+              <p class="text-xs uppercase tracking-wider text-slate-500">Before</p>
+              <div class="mt-5 grid grid-cols-2 gap-3 text-center text-xs">
+                <div class="rounded border bg-white p-3">Local SearchResult<br /><span class="text-slate-500">doc_id only</span></div>
+                <div class="rounded border bg-white p-3">Web dict<br /><span class="text-slate-500">never returned</span></div>
+                <div class="col-span-2 leak">route calls rag_service private methods</div>
+                <div class="col-span-2 rounded border bg-white p-3">Answer text</div>
+                <div class="col-span-2 rounded border bg-white p-3">Unbound source list</div>
+              </div>
+            </div>
+            <div class="deep rounded bg-white p-5">
+              <p class="text-xs uppercase tracking-wider text-slate-500">After</p>
+              <div class="mt-5 rounded border-2 border-slate-900 p-4">
+                <div class="text-center text-sm font-semibold">Retrieval Context</div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
+                  <div class="seam rounded border p-2">Local adapter</div>
+                  <div class="seam rounded border p-2">Web adapter</div>
+                  <div class="col-span-2 rounded bg-slate-900 p-2 text-white">stable citation ID</div>
+                  <div class="rounded border p-2">line / page locator</div>
+                  <div class="rounded border p-2">URL locator</div>
+                  <div class="col-span-2 rounded border p-2">prompt + citations together</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Problem</p><p class="mt-1 text-sm">回答和来源分别拼装，模型没有稳定引用标记；本地切片缺少行号/页码，Web 来源被丢弃。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Solution</p><p class="mt-1 text-sm">本地与 Web 检索统一成 citation-bearing retrieval；上下文与来源由同一 module 生成。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Wins</p><ul class="mt-1 list-disc pl-4 text-sm"><li>引用与证据同源</li><li>locality: 编排集中</li><li>角标可点击回溯</li></ul></div>
+          </div>
+          <div class="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">强化 CONTEXT 不变量 3，不改变 ADR-0006 的“先召回、后融合排序”。</div>
+        </article>
+
+        <article id="search" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-2xl font-semibold">3. 建立联网搜索 seam</h2>
+            <div class="flex gap-2 text-xs font-medium">
+              <span class="rounded bg-amber-100 px-2 py-1 text-amber-900">Worth exploring</span>
+              <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">local-substitutable</span>
+            </div>
+          </div>
+          <p class="mt-4 font-mono text-xs text-slate-600">services/search_service.py · core/config.py · compose files · backend/tests</p>
+          <div class="mt-6 grid gap-5 lg:grid-cols-2">
+            <div class="rounded border border-slate-200 bg-stone-50 p-4">
+              <p class="mb-3 text-xs uppercase tracking-wider text-slate-500">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  Chat --> Bing[Bing HTML regex]
+  Report --> Bing
+  Endpoint --> Bing
+  Bing -. any error .-> Empty[empty list]
+  Empty -. indistinguishable .-> UI[No results]
+  style Empty stroke:#dc2626,color:#dc2626
+              </pre>
+            </div>
+            <div class="rounded border-2 border-slate-900 bg-white p-4">
+              <p class="mb-3 text-xs uppercase tracking-wider text-slate-500">After</p>
+              <pre class="mermaid">
+flowchart LR
+  Callers --> G[Search Gateway]
+  G --> S[SearXNG adapter]
+  G --> H[Hosted API adapter]
+  G --> B[Bing fallback adapter]
+  G --> R[typed results / typed failure]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class G deep
+              </pre>
+            </div>
+          </div>
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Problem</p><p class="mt-1 text-sm">HTML 正则不稳定且质量不可控；所有错误都变成空结果，调用者无法降级或告知用户。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Solution</p><p class="mt-1 text-sm">一个 deep gateway 负责重试、去重、质量过滤和错误语义，两个真实 adapter 形成可替换 seam。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Wins</p><ul class="mt-1 list-disc pl-4 text-sm"><li>Provider 可替换</li><li>失败不再静默</li><li>测试命中一个 interface</li></ul></div>
+          </div>
+          <div class="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">选择：SearXNG 免费私有但需要 Docker；托管搜索稳定省事但需要 Key/费用；Bing 只能保留为降级 adapter。</div>
+        </article>
+
+        <article id="jobs" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-2xl font-semibold">4. 长任务后台化</h2>
+            <div class="flex gap-2 text-xs font-medium">
+              <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">Speculative</span>
+              <span class="rounded bg-slate-100 px-2 py-1 text-slate-700">ports &amp; adapters</span>
+            </div>
+          </div>
+          <p class="mt-4 font-mono text-xs text-slate-600">api/files.py · new ingestion job module · web/src/app/documents/page.tsx</p>
+          <div class="mt-6 grid gap-5 lg:grid-cols-2">
+            <div class="rounded border border-slate-200 bg-stone-50 p-5 text-center text-sm"><div class="rounded border bg-white p-3">HTTP upload waits for parse → tag → embed → two writes</div><p class="mt-4 leak">timeout loses progress and error stage</p></div>
+            <div class="deep rounded bg-white p-5 text-center text-sm"><div class="rounded border-2 border-slate-900 p-3">Upload → job ID</div><div class="my-2">↓</div><div class="rounded border p-3">queued → parsing → indexing → ready / failed</div></div>
+          </div>
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Problem</p><p class="mt-1 text-sm">OCR、视觉理解、音频转写会让同步上传 interface 超时。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Solution</p><p class="mt-1 text-sm">先用 SQLite job queue 深化任务 module，不立即引入 Redis/Celery。</p></div>
+            <div><p class="text-xs uppercase tracking-wider text-slate-500">Wins</p><ul class="mt-1 list-disc pl-4 text-sm"><li>进度与失败可见</li><li>重试集中在 module</li><li>未来可换 worker adapter</li></ul></div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-lg border-2 border-slate-900 bg-slate-900 p-7 text-white">
+        <p class="text-xs uppercase tracking-wider text-slate-300">Top Recommendation</p>
+        <h2 class="mt-2 text-2xl font-semibold"><a class="underline decoration-emerald-400 decoration-2 underline-offset-4" href="#retrieval">先合并检索上下文与引用 module</a></h2>
+        <p class="mt-3 text-slate-200">它直接修复联网开关与角标回溯，并给随后所有解析 adapter 提供统一 locator 目标；然后深化入库 module，最后接入选定的搜索与多模态 adapter。</p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -57,9 +57,10 @@ async def upload_file(
 
     metadata = {
         "title": file.filename,
-        "url": "",
+        "url": file_service.get_file_url(object_name),
         "source_type": "file",
         "created_at": datetime.now().isoformat(),
+        "published_at": "",
         "tags": {
             "business_type": tags.business_type,
             "geographic_region": tags.geographic_region,
@@ -67,7 +68,7 @@ async def upload_file(
             "event_nature": tags.event_nature,
         },
     }
-    chroma_store.add_document(doc_id=doc_id, chunks=chunk_texts, embeddings=embeddings, metadata=metadata)
+    chroma_store.add_document(doc_id=doc_id, chunks=chunks, embeddings=embeddings, metadata=metadata)
 
     # 存元数据记录
     from ..models.document import Document

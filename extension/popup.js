@@ -66,11 +66,12 @@ async function saveCurrentPage() {
     const result = await response.json();
 
     if (result.success) {
-      const tags = result.tags;
+      const tags = result.tags || {};
       const tagStr = [
-        ...tags.business_type,
-        ...tags.geographic_region,
-        ...tags.topic_category,
+        ...(tags.business_type || []),
+        ...(tags.geographic_region || []),
+        ...(tags.topic_category || []),
+        ...(tags.event_nature || []),
       ].slice(0, 3).join('、') || '通用';
 
       showStatus(`✅ 保存成功！自动标签：${tagStr}`, 'success');

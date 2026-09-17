@@ -20,10 +20,10 @@ REPORT_TYPES: dict[str, ReportType] = {
 
 语言专业、数据准确、引用来源。格式使用 Markdown。""",
         search_queries=[
-            "本周集装箱运价指数 SCFI CCFI 最新",
-            "全球港口拥堵 航运新闻 本周",
-            "国际航运政策 法规更新 最新",
-            "航运市场热点 船舶事故 最新一周",
+            "最新 集装箱运价 SCFI CCFI 航运",
+            "全球港口拥堵 最新 航运新闻",
+            "国际航运政策 最新 法规更新",
+            "航运市场 最新 热点 船舶",
         ],
     ),
     "risk_alert": ReportType(
@@ -39,9 +39,9 @@ REPORT_TYPES: dict[str, ReportType] = {
 
 聚焦于风险和安全，提供可操作的建议。格式使用 Markdown。""",
         search_queries=[
-            "红海 航运安全 最新风险",
-            "全球海盗袭击 航运 最新",
-            "港口罢工 天气预警 航运",
+            "红海 航运安全 最新 风险",
+            "海盗袭击 航运 最新",
+            "港口罢工 天气预警 航运 最新",
         ],
     ),
     "convention_update": ReportType(
@@ -57,9 +57,9 @@ REPORT_TYPES: dict[str, ReportType] = {
 
 语言准确、引用权威来源、避免误导。格式使用 Markdown。""",
         search_queries=[
-            "IMO 国际海事组织 最新公约 修订",
-            "MARPOL SOLAS 最新修正案",
-            "航运碳排放 欧盟ETS 最新政策",
+            "IMO 国际海事组织 最新 公约 修订",
+            "MARPOL SOLAS 最新 修正案",
+            "航运碳排放 欧盟ETS 最新 政策",
         ],
     ),
 }
