@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
     APP_DEBUG: bool = False
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8501,chrome-extension://*"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,chrome-extension://*"
 
     # ── 数据目录(SQLite / Chroma / 文件 都放这里,方便备份与 gitignore)──
     DATA_DIR: str = str(PROJECT_ROOT / "data")

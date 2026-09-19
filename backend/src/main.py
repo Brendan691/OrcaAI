@@ -14,7 +14,6 @@ from .api.generate import router as generate_router
 from .api.search import router as search_router
 
 # 以下功能已实现但暂挪到路线图(见 ROADMAP.md),默认不启用:
-#   - api.search  联网搜索(依赖 SearXNG)
 #   - api.wechat  微信公众号接入(依赖公网+已认证公众号)
 # 需要时取消注释并注册即可,代码文件保留在仓库中。
 
@@ -52,7 +51,7 @@ app.include_router(search_router)      # 联网搜索
 async def root():
     return {
         "name": "小鲸 OrcaAI",
-        "version": "0.4.0",
+        "version": "0.4.0-alpha",
         "description": "AI 驱动的一站式海事知识管理工具",
         "docs": "/docs",
     }
