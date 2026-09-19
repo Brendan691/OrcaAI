@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="小鲸 OrcaAI",
     description="AI 驱动的一站式海事知识管理工具 — 收集、整理、应用、分享",
-    version="0.4.0-alpha",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -51,7 +51,7 @@ app.include_router(search_router)      # 联网搜索
 async def root():
     return {
         "name": "小鲸 OrcaAI",
-        "version": "0.4.0-alpha",
+        "version": "0.4.0",
         "description": "AI 驱动的一站式海事知识管理工具",
         "docs": "/docs",
     }

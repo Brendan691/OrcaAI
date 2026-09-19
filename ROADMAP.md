@@ -2,7 +2,7 @@
 
 本文件记录**尚未实现、暂缓或已知损坏**的部分。已实现的能力见 [README.md](README.md),历史变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-当前版本:**`v0.4.0-alpha`**
+当前版本:**`v0.4.0`**
 
 ---
 
@@ -101,7 +101,7 @@ class Collector(Protocol):
 
 本机未安装 Docker,以下问题由代码阅读确认,**没有经过实际构建验证**:
 
-1. `Dockerfile` 仍执行 `COPY admin/ admin/` 与 `COPY searxng/ searxng/`,而这两个目录已在 v0.4.0-alpha 删除 → 镜像构建必然失败。
+1. `Dockerfile` 仍执行 `COPY admin/ admin/` 与 `COPY searxng/ searxng/`,而这两个目录已在 v0.4.0 删除 → 镜像构建必然失败。
 2. `Dockerfile` 的 `CMD` 写的是 `uvicorn backend.src.main:app`,但 `backend/` 不是 Python 包(没有 `__init__.py`),实际入口是 `cd backend && uvicorn src.main:app`。
 3. `docker-compose.yml` 仍保留 `admin`(Streamlit)与 `searxng` 两个服务,它们挂载的 `admin/app.py`、`searxng/settings.yml`、`searxng/limiter.toml` 都已不存在。
 4. `web/Dockerfile` 不存在,compose 里的 `web` 服务无法构建。
