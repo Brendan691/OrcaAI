@@ -32,6 +32,29 @@ class HostedSearch:
         )
 
 
+class VariantSearch:
+    def __init__(self):
+        self.variants = []
+
+    async def search_variants(self, variants, limit: int = 5) -> SearchOutcome:
+        self.variants = [variant.rule for variant in variants]
+        return SearchOutcome(
+            status="ok",
+            provider="tavily",
+            query_variants=[variant.text for variant in variants],
+            results=[
+                WebSearchResult(
+                    title="2024 annual report",
+                    url="https://example.com/report",
+                    snippet="4.9 percent risk and 0.4 percent abnormal.",
+                    provider="tavily",
+                    variant_rule="neutral-recency",
+                    variant_rank=2,
+                )
+            ],
+        )
+
+
 @pytest.mark.asyncio
 async def test_web_only_chat_returns_clickable_citation_without_llm():
     service = RAGService(
@@ -69,3 +92,25 @@ async def test_chat_does_not_search_web_when_toggle_is_disabled():
 
     assert response.sources == []
     assert response.search_status == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_web_only_chat_uses_audited_query_variants():
+    web = VariantSearch()
+    service = RAGService(
+        embedding=FakeEmbedding(),
+        knowledge_base=EmptyKnowledgeBase(),
+        web_search=web,
+        llm_enabled=False,
+    )
+
+    response = await service.chat(
+        ChatRequest(
+            message="中国海员心理健康水平是否明显低于常人？",
+            search_internet=True,
+        )
+    )
+
+    assert web.variants == ["original", "maritime-synonym", "neutral-recency"]
+    assert response.sources[0].url == "https://example.com/report"
+    assert response.search_status == "ok"

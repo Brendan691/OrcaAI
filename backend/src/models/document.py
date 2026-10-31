@@ -21,6 +21,8 @@ class DocumentChunk(BaseModel):
     line_start: int = Field(..., description="在原文档中的起始行")
     line_end: int = Field(..., description="在原文档中的结束行")
     page_number: Optional[int] = Field(default=None, description="原始文件页码")
+    flags: List[str] = Field(default_factory=list, description="切片处理标记（表格原子化、尾块合并等）")
+    prefix_hint: str = Field(default="", description="嵌入时前置的提示（如续表表头），不改变 char 偏移")
 
 
 class MaritimeDocument(BaseModel):
@@ -69,6 +71,9 @@ class ChatResponse(BaseModel):
     confidence: float = Field(default=0.0)
     search_status: Literal["disabled", "ok", "degraded", "failed"] = "disabled"
     search_message: str = ""
+    query_variants: List[str] = Field(default_factory=list)
+    retrieval_policy: dict = Field(default_factory=dict)
+    conflict_priors: List[dict] = Field(default_factory=list)
 
 
 class WebSearchResult(BaseModel):
@@ -78,6 +83,9 @@ class WebSearchResult(BaseModel):
     provider: str
     score: Optional[float] = None
     published_at: Optional[str] = None
+    query_variant: str = ""
+    variant_rule: str = ""
+    variant_rank: Optional[int] = None
 
 
 class SearchWarning(BaseModel):
@@ -86,11 +94,22 @@ class SearchWarning(BaseModel):
     provider: str = ""
 
 
+class SearchVariantTrace(BaseModel):
+    query: str
+    rule: str
+    status: Literal["ok", "degraded", "failed"]
+    provider: str = ""
+    result_count: int = 0
+    warning_codes: List[str] = Field(default_factory=list)
+
+
 class SearchOutcome(BaseModel):
     status: Literal["ok", "degraded", "failed"]
     provider: str = ""
     results: List[WebSearchResult] = Field(default_factory=list)
     warnings: List[SearchWarning] = Field(default_factory=list)
+    query_variants: List[str] = Field(default_factory=list)
+    variant_traces: List[SearchVariantTrace] = Field(default_factory=list)
 
 
 class UploadRequest(BaseModel):

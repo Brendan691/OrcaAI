@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -43,7 +44,7 @@ class CareReranker:
             return CareRerankOutcome(results=[], used=False, weight=0.0)
         if (
             not self.enabled
-            or (self.requester is None and not config.has_api_key)
+            or (self.requester is None and not config.has_dashscope_api_key)
             or len(candidates) < 2
         ):
             return CareRerankOutcome(results=candidates[:top_k], used=False, weight=0.0)
@@ -70,7 +71,14 @@ class CareReranker:
 
         baseline_margin = max(0.0, selected[0].score - selected[1].score)
         gte_margin = max(0.0, ordered[0]["relevance_score"] - ordered[1]["relevance_score"])
-        weight = self.adaptive_weight(baseline_margin, gte_margin)
+        top1_agreement = float(
+            selected[0].doc_id == selected[ordered[0]["index"]].doc_id
+        )
+        weight = self.adaptive_weight(
+            baseline_margin,
+            gte_margin,
+            top1_agreement=top1_agreement,
+        )
         baseline_rr = {index: 1.0 / rank for rank, index in enumerate(range(len(selected)), start=1)}
         gte_rr = {item["index"]: 1.0 / rank for rank, item in enumerate(ordered, start=1)}
         gte_score = {item["index"]: item["relevance_score"] for item in ordered}
@@ -90,9 +98,28 @@ class CareReranker:
         )
 
     @staticmethod
-    def adaptive_weight(baseline_margin: float, gte_margin: float) -> float:
-        relative = gte_margin / (gte_margin + baseline_margin + 1e-8)
-        return min(1.0, max(0.0, config.CARE_WEIGHT_LOW + config.CARE_WEIGHT_SPAN * relative))
+    def adaptive_weight(
+        baseline_margin: float,
+        gte_margin: float,
+        *,
+        top1_agreement: float = 0.0,
+    ) -> float:
+        baseline_z = (
+            baseline_margin - config.CARE_MARGIN_A_MEAN
+        ) / config.CARE_MARGIN_A_SCALE
+        gte_z = (
+            gte_margin - config.CARE_MARGIN_G_MEAN
+        ) / config.CARE_MARGIN_G_SCALE
+        agreement_z = (
+            top1_agreement - config.CARE_AGREEMENT_MEAN
+        ) / config.CARE_AGREEMENT_SCALE
+        logit = (
+            config.CARE_GATE_INTERCEPT
+            + config.CARE_GATE_BASELINE_MARGIN * baseline_z
+            + config.CARE_GATE_GTE_MARGIN * gte_z
+            + config.CARE_GATE_TOP1_AGREEMENT * agreement_z
+        )
+        return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, logit))))
 
     @staticmethod
     def _validate_response(response: list[dict], candidate_count: int) -> list[dict]:

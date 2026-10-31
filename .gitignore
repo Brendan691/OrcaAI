@@ -22,6 +22,7 @@ uploads/
 
 # System
 .DS_Store
+._*
 Thumbs.db
 
 # IDE

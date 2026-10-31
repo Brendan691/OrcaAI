@@ -84,7 +84,7 @@ class ReportGenerator:
         # 从知识库检索相关内容作为素材
         knowledge_context = ""
         sources = []
-        if settings.has_api_key:
+        if settings.has_dashscope_api_key:
             for query in rt.search_queries[:3]:
                 try:
                     q_emb = embedding_service.embed_text(query)

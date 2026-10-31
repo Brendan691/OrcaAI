@@ -31,3 +31,8 @@ class SearchResult(BaseModel):
     time_score: float = Field(default=0.0)
     tag_score: float = Field(default=0.0)
     tags: DocumentTags = Field(default_factory=DocumentTags)
+    published_at: Optional[str] = None
+    provider: str = ""
+    query_variant: str = ""
+    variant_rule: str = ""
+    variant_rank: Optional[int] = None

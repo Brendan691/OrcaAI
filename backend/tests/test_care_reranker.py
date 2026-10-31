@@ -34,7 +34,7 @@ async def test_care_reranker_uses_cross_encoder_confidence():
     )
 
     assert outcome.used is True
-    assert outcome.weight > 0.9
+    assert 0.65 <= outcome.weight <= 0.8
     assert [item.doc_id for item in outcome.results] == ["gte-first", "baseline-first"]
 
 
@@ -55,8 +55,9 @@ async def test_care_reranker_falls_back_on_invalid_response():
     assert outcome.warning.startswith("CARE rerank fallback")
 
 
-def test_care_weight_trusts_larger_gte_margin():
+def test_care_weight_uses_frozen_smooth_gate():
     low_confidence = CareReranker.adaptive_weight(0.2, 0.01)
     high_confidence = CareReranker.adaptive_weight(0.01, 0.5)
 
-    assert 0.4 <= low_confidence < high_confidence <= 1.0
+    assert 0.65 <= low_confidence <= 0.8
+    assert 0.65 <= high_confidence <= 0.8

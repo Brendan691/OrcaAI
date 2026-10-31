@@ -104,6 +104,14 @@ class EvidenceSelector:
             selected.append(result)
         return selected, removed
 
+    def deduplicate_web(
+        self,
+        local_results: list[SearchResult],
+        web_results: list[WebSearchResult],
+    ) -> tuple[list[WebSearchResult], int]:
+        """Public cross-source deduplication for unified candidate pipelines."""
+        return self._deduplicate_web(local_results, web_results)
+
     @staticmethod
     def _canonical_url(value: str) -> str:
         if not value:

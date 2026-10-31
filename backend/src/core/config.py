@@ -28,16 +28,31 @@ class Settings(BaseSettings):
     # ── AI 服务 (通义千问) ──
     DASHSCOPE_API_KEY: str = ""
     DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    QWEN38_API_KEY: str = ""
+    QWEN38_BASE_URL: str = ""
+    QWEN38_MODEL: str = ""
     EMBEDDING_MODEL: str = "text-embedding-v3"
+    EMBEDDING_BACKEND: str = "dashscope"  # dashscope | local
+    EMBEDDING_ENDPOINT: str = "http://127.0.0.1:8765/embed"
     CHAT_MODEL: str = "qwen-max"
     RERANK_ENABLED: bool = True
     RERANK_MODEL: str = "gte-rerank-v2"
     DASHSCOPE_RERANK_ENDPOINT: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-    RERANK_CANDIDATES: int = 10
+    # 六基线中的 GTE 重排需要远程端点；系统 CARE 用 DASHSCOPE_RERANK_ENDPOINT（当前指向本地 shim）
+    DASHSCOPE_RERANK_ENDPOINT_REMOTE: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    RERANK_CANDIDATES: int = 20
     RERANK_MAX_CHARACTERS: int = 1800
     RERANK_TIMEOUT_SECONDS: float = 5.0
-    CARE_WEIGHT_LOW: float = 0.4
-    CARE_WEIGHT_SPAN: float = 0.8
+    CARE_GATE_INTERCEPT: float = 0.9576165309
+    CARE_GATE_BASELINE_MARGIN: float = -0.0727441442
+    CARE_GATE_GTE_MARGIN: float = -0.0709721196
+    CARE_GATE_TOP1_AGREEMENT: float = -0.0004781195
+    CARE_MARGIN_A_MEAN: float = 0.1174899141
+    CARE_MARGIN_A_SCALE: float = 0.1067816975
+    CARE_MARGIN_G_MEAN: float = 0.2844998832
+    CARE_MARGIN_G_SCALE: float = 0.2407881853
+    CARE_AGREEMENT_MEAN: float = 0.725
+    CARE_AGREEMENT_SCALE: float = 0.4465142775
 
     # ── 数据库(本地默认 SQLite;生产切 Postgres,见 ADR-0002)──
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/orca.db"
@@ -95,8 +110,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
 
     # ── 文档处理 ──
-    CHUNK_SIZE: int = 1024
-    CHUNK_OVERLAP: int = 128
+    # V12 分块规范（2026-10-15 冻结）：目标 500–800 字符，重叠 100–150；
+    # 表格独立成块，超过 CHUNK_MAX_TABLE 时按行拆分并给续块加表头提示。
+    CHUNK_SIZE: int = 600
+    CHUNK_OVERLAP: int = 100
+    CHUNK_MIN_LENGTH: int = 500
+    CHUNK_MAX_TABLE: int = 1000  # 表格超过该长度时，其后续块需带表头提示
     TOP_K: int = 5
 
     # ── 混合搜索权重 ──
@@ -110,6 +129,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "APP_PORT", "RATE_LIMIT_PER_MINUTE", "CHUNK_SIZE", "CHUNK_OVERLAP", "TOP_K",
+        "CHUNK_MIN_LENGTH", "CHUNK_MAX_TABLE",
         "RERANK_CANDIDATES", "RERANK_MAX_CHARACTERS", mode="before",
     )
     @classmethod
@@ -132,9 +152,32 @@ class Settings(BaseSettings):
 
     @property
     def has_api_key(self) -> bool:
+        if self.qwen38_configured:
+            return self.qwen38_complete
+        return self.has_dashscope_api_key
+
+    @property
+    def has_dashscope_api_key(self) -> bool:
+        """Whether the general DashScope credential is usable.
+
+        The Qwen3.8 gateway is intentionally isolated to answer generation;
+        embedding, reranking and auxiliary LLM calls must not borrow it.
+        """
         return bool(self.DASHSCOPE_API_KEY and self.DASHSCOPE_API_KEY not in (
             "your_dashscope_api_key_here", "sk-your-api-key", ""
         ))
+
+    @property
+    def qwen38_configured(self) -> bool:
+        return any((self.QWEN38_API_KEY, self.QWEN38_BASE_URL, self.QWEN38_MODEL))
+
+    @property
+    def qwen38_complete(self) -> bool:
+        return all((self.QWEN38_API_KEY, self.QWEN38_BASE_URL, self.QWEN38_MODEL))
+
+    @property
+    def has_partial_qwen38_config(self) -> bool:
+        return self.qwen38_configured and not self.qwen38_complete
 
     @property
     def s3_endpoint_url(self) -> str:

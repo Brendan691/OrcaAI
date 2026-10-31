@@ -216,6 +216,7 @@ class HybridSearch:
         query: str,
         tag_filter: Optional[DocumentTags] = None,
         top_k: int = 5,
+        target_year: int | None = None,
         diversify: bool = True,
     ) -> RankingDecision:
         """自适应地融合候选信号，并选择低冗余证据。
@@ -255,6 +256,7 @@ class HybridSearch:
         query: str,
         tag_filter: Optional[DocumentTags] = None,
         top_k: int = 5,
+        target_year: int | None = None,
         diversify: bool = True,
         adaptive: bool = True,
         missingness_gate: bool = True,
@@ -303,6 +305,8 @@ class HybridSearch:
                     keyword_score=round(item["lexical"], 4),
                     time_score=round(item["temporal"], 4) if item["temporal_valid"] else 0.0,
                     tag_score=round(item["tag"], 4) if profile.weights["tag"] else 0.0,
+                    published_at=hit.get("published_at"),
+                    provider=hit.get("provider", ""),
                     tags=DocumentTags(
                         business_type=tags.get("business_type", []),
                         geographic_region=tags.get("geographic_region", []),
@@ -313,7 +317,12 @@ class HybridSearch:
             )
 
         scored.sort(key=lambda result: result.score, reverse=True)
-        selected = self._select_diverse(scored, top_k, profile.diversity_weight) if diversify else scored[:top_k]
+        if target_year is not None:
+            # 时间元数据软约束：加权重排 + Top-K 覆盖保障（缺时间文档仅用于补齐）
+            scored = apply_time_boost(scored, target_year)
+            selected = ensure_time_coverage(scored, target_year, top_k)
+        else:
+            selected = self._select_diverse(scored, top_k, profile.diversity_weight) if diversify else scored[:top_k]
         return RankingDecision(
             results=selected,
             profile=profile,

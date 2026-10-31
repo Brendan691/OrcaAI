@@ -87,7 +87,7 @@ class RetrievalContext:
         for citation in citations:
             attrs = [
                 f'id="{html.escape(citation.id)}"',
-                f'cite_marker="{html.escape(citation.cite_marker)}"',
+                f'cite_marker="{html.escape(citation.cite_marker)}" time_note="{html.escape(evidence_time_note(getattr(citation, "year", None)))}"',
                 f'source="{citation.source_type}"',
                 f'title="{html.escape(citation.title)}"',
             ]
@@ -114,3 +114,103 @@ class RetrievalContext:
                 f"{citation.cite_marker}"
             )
         return "\n".join(lines)
+
+
+def _year_of(value) -> int | None:
+    """安全解析年份；脏值一律视为未知（不抛异常）。"""
+    if value is None:
+        return None
+    try:
+        return int(str(value)[:4])
+    except (TypeError, ValueError):
+        return None
+
+
+def time_weight_for(year, target_year, window: int = 2) -> float:
+    """软约束时间权重（严禁硬过滤）。
+
+    year == target       -> 1.5
+    |Δ| <= 1             -> 1.2
+    |Δ| <= window(默认2)  -> 1.0
+    超出 window          -> 0.6（降权但保留）
+    year 缺失(None)      -> 0.8（降权但保留）
+    """
+    if target_year is None:
+        return 1.0
+    value = _year_of(year)
+    if value is None:
+        return 0.8
+    delta = abs(value - int(target_year))
+    if delta == 0:
+        return 1.5
+    if delta <= 1:
+        return 1.2
+    if delta <= int(window):
+        return 1.0
+    return 0.6
+
+
+def _get_score(hit) -> float:
+    return float(getattr(hit, "score", 0.0) if not isinstance(hit, dict) else hit.get("score", 0.0))
+
+
+def _set(hit, name, value) -> None:
+    if isinstance(hit, dict):
+        hit[name] = value
+    else:
+        setattr(hit, name, value)
+
+
+def apply_time_boost(hits: list, target_year, window: int = 2) -> list:
+    """把时间权重乘到检索得分上并重排；不丢弃任何文档。"""
+    boosted = []
+    for hit in hits:
+        weight = time_weight_for(getattr(hit, "year", None) if not isinstance(hit, dict) else hit.get("year"), target_year, window)
+        _set(hit, "time_weight_applied", weight)
+        _set(hit, "temporal_fallback", weight == 0.8)
+        _set(hit, "score", _get_score(hit) * weight)
+        boosted.append(hit)
+    return sorted(boosted, key=_get_score, reverse=True)
+
+
+def ensure_time_coverage(ranked: list, target_year, top_k: int, window: int = 2) -> list:
+    """先保证"有年且在容忍窗口内"的文档进 Top-K；不足时才用缺年文档补齐。"""
+    if target_year is None:
+        return list(ranked[:top_k])
+    in_window, outside, unknown = [], [], []
+    for hit in ranked:
+        value = _year_of(getattr(hit, "year", None) if not isinstance(hit, dict) else hit.get("year"))
+        if value is None:
+            unknown.append(hit)
+        elif abs(value - int(target_year)) <= int(window):
+            in_window.append(hit)
+        else:
+            outside.append(hit)
+    out = (in_window + outside)[:top_k]
+    if len(out) < top_k:
+        for hit in unknown:
+            if len(out) >= top_k:
+                break
+            out.append(hit)
+    return out
+
+
+def filter_by_year(hits: list, year, keep_unknown: bool = True, window: int = 2) -> list:
+    """兼容旧调用：软约束重排 + Top-K 覆盖保障（绝不硬过滤）。
+
+    keep_unknown 保留参数仅为兼容；缺时间文档始终保留（降权 + 后置）。
+    """
+    del keep_unknown
+    return apply_time_boost(list(hits), year, window)
+
+
+def evidence_time_note(year) -> str:
+    """生成阶段的时间提示：缺时间必须显式声明，防止模型脑补年份。"""
+    value = _year_of(year)
+    if value is None:
+        return "此证据未标注发布时间"
+    return f"该证据发布时间：{value} 年"
+
+
+def filter_by_year_legacy(*_args, **_kwargs):
+    raise NotImplementedError("硬过滤版本已废弃：时间条件必须使用软约束（apply_time_boost）")

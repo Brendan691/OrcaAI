@@ -9,6 +9,7 @@ from src.services.search_service import (
     SearchProviderError,
     TavilySearchAdapter,
 )
+from src.services.query_intent import QueryIntentAnalyzer
 
 
 class FailingAdapter:
@@ -91,3 +92,58 @@ async def test_tavily_adapter_maps_hosted_response_to_search_results():
             published_at="2026-07-30",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_multi_query_search_preserves_traces_and_deduplicates_urls():
+    class VariantAdapter:
+        name = "variant"
+
+        async def search(self, query: str, limit: int) -> list[WebSearchResult]:
+            if query.endswith("最新年度报告"):
+                return [
+                    WebSearchResult(
+                        title="2024 annual report",
+                        url="https://example.com/report?utm=1",
+                        snippet="4.9 percent risk",
+                        provider="variant",
+                        score=0.9,
+                    ),
+                    WebSearchResult(
+                        title="Duplicate",
+                        url="https://example.com/old#section",
+                        snippet="duplicate",
+                        provider="variant",
+                        score=0.5,
+                    ),
+                ]
+            return [
+                WebSearchResult(
+                    title="Old study",
+                    url="https://example.com/old",
+                    snippet="old conclusion",
+                    provider="variant",
+                    score=0.8,
+                )
+            ]
+
+    intent = QueryIntentAnalyzer().analyze(
+        "中国海员心理健康水平是否明显低于常人？",
+        current_year=2026,
+    )
+    outcome = await SearchGateway(primary=VariantAdapter()).search_variants(
+        intent.variants,
+        limit=10,
+    )
+
+    assert outcome.status == "ok"
+    assert outcome.query_variants == list(intent.web_queries)
+    assert [trace.result_count for trace in outcome.variant_traces] == [1, 1, 2]
+    assert {item.url for item in outcome.results} == {
+        "https://example.com/old",
+        "https://example.com/report?utm=1",
+    }
+    report = next(item for item in outcome.results if "annual" in item.title)
+    assert report.variant_rule == "neutral-recency"
+    assert report.variant_rank == 1
+    assert outcome.results.index(report) < 4

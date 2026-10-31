@@ -12,6 +12,7 @@ from .api.files import router as files_router
 from .api.teams import router as teams_router
 from .api.generate import router as generate_router
 from .api.search import router as search_router
+from .services.dependency_health import log_startup_report, probe_dependencies
 
 # 以下功能已实现但暂挪到路线图(见 ROADMAP.md),默认不启用:
 #   - api.wechat  微信公众号接入(依赖公网+已认证公众号)
@@ -21,13 +22,14 @@ from .api.search import router as search_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    log_startup_report()
     yield
 
 
 app = FastAPI(
     title="小鲸 OrcaAI",
     description="AI 驱动的一站式海事知识管理工具 — 收集、整理、应用、分享",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 
@@ -51,7 +53,7 @@ app.include_router(search_router)      # 联网搜索
 async def root():
     return {
         "name": "小鲸 OrcaAI",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "description": "AI 驱动的一站式海事知识管理工具",
         "docs": "/docs",
     }
@@ -59,7 +61,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    dependencies = probe_dependencies()
+    return {
+        "status": "healthy" if dependencies["ready"] else "degraded",
+        "ready": dependencies["ready"],
+        "dependencies": dependencies["services"],
+    }
 
 
 if __name__ == "__main__":

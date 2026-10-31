@@ -36,7 +36,7 @@ class TagClassifier:
 
     def classify(self, content: str, use_llm: bool = True) -> DocumentTags:
         """分类入口:优先 LLM,失败或无 Key 时回退规则引擎。"""
-        if use_llm and config.has_api_key:
+        if use_llm and config.has_dashscope_api_key:
             try:
                 return self.classify_with_llm(content)
             except Exception as e:

@@ -94,3 +94,79 @@ class TestDocumentProcessor:
         )
 
         assert self.processor._extract_published_at(soup) == "2026-08-20T09:30:00+08:00"
+
+
+class TestChunkFreezeRules:
+    """2026-10-14 冻结的切片规则：表格原子化、短块合并、定位可回溯。"""
+
+    def setup_method(self):
+        self.processor = DocumentProcessor()
+
+    @staticmethod
+    def _table(rows: int) -> str:
+        lines = ["| 编号 | 要求 | SL1 |", "| --- | --- | --- |"]
+        for index in range(rows):
+            lines.append(f"| SR1.{index} | 应支持统一帐户管理的能力第{index}条 | √ |")
+        return "\n".join(lines)
+
+    def test_chunk_content_matches_offsets(self):
+        text = "第一行。\n" + ("航运信息。" * 400) + "\n最后一行。"
+        _, chunks = self.processor.process_text(text)
+
+        assert chunks
+        for chunk in chunks:
+            assert chunk.content == text[chunk.start_idx : chunk.end_idx]
+            assert chunk.line_start == text.count("\n", 0, chunk.start_idx) + 1
+            end_for_line = max(chunk.start_idx, chunk.end_idx - 1)
+            assert chunk.line_end == text.count("\n", 0, end_for_line) + 1
+
+    def test_table_kept_in_one_chunk(self):
+        table = self._table(20)
+        text = ("前文。" * 200) + "\n" + table + "\n后续正文。" * 50
+        _, chunks = self.processor.process_text(text)
+
+        holders = [c for c in chunks if "| 编号 | 要求 | SL1 |" in c.content]
+        assert holders, "表格未被任何切片收录"
+        holder = holders[0]
+        for line in table.split("\n"):
+            assert line in holder.content, f"表格行被切散：{line}"
+
+    def test_table_kept_atomic_under_v3_spec(self):
+        """v3 规范：Markdown 表格整表独立成块，不再按行拆分。"""
+        table = self._table(400)
+        _, chunks = self.processor.process_text(table)
+        holders = [c for c in chunks if "| 编号 | 要求 | SL1 |" in c.content]
+        assert holders, "表格未被任何切片收录"
+        holder = holders[0]
+        assert holder.content.lstrip().startswith("|")
+        assert holder.content.rstrip().endswith("|")
+        full_rows = sum(1 for line in holder.content.split("\n") if line.strip().startswith("|"))
+        assert full_rows >= 3, "表格应整表成块"
+
+    def test_v3_chunk_size_and_offsets(self):
+        """v3 规范：递归分层切分，块长不超过上限 + 重叠，且偏移精确。"""
+        text = ("正文内容。" * 300) + "尾"
+        _, chunks = self.processor.process_text(text)
+        assert len(chunks) >= 1
+        for chunk in chunks:
+            assert chunk.content == text[chunk.start_idx:chunk.end_idx]
+            assert len(chunk.content) <= self.processor.chunk_size + 120, (
+                f"块长超上限：{len(chunk.content)}"
+            )
+        assert any(
+            chunks[i + 1].start_idx < chunks[i].end_idx for i in range(len(chunks) - 1)
+        ), "相邻块之间应存在重叠"
+
+    def test_no_table_chunk_cut_mid_row(self):
+        table = self._table(60)
+        text = ("段落文字。" * 100) + "\n" + table + "\n" + ("结尾文字。" * 100)
+        _, chunks = self.processor.process_text(text)
+
+        for chunk in chunks:
+            content = chunk.content
+            if "|" in content and "table_split_at_row" not in chunk.flags:
+                rows = [line for line in content.split("\n") if line.strip().startswith("|")]
+                if rows:
+                    assert rows[-1].rstrip().endswith("|"), (
+                        f"切片在表格行中间结束且未标记：{rows[-1][:60]}"
+                    )

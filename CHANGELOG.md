@@ -4,6 +4,73 @@
 
 ---
 
+## [0.5.0] - 2026-10-31
+
+正式发布。本版把"线上检索"与"论文实验"收敛到同一套编码、意图与候选策略实现上,
+并补齐了依赖可观测性与测试隔离。
+
+### 🔬 编码与重排同构
+
+- 新增 `backend/src/services/bge_encoder.py` 作为 BGE-M3 的**唯一实现**
+  (CLS pooling + L2 归一化 + `max_length=1024` + CPU 4 线程 + 导出 `fingerprint`),
+  线上服务与离线实验必须共同 import 本模块,禁止各自复制加载逻辑,保证"评测口径 = 系统口径"。
+- 新增 `EMBEDDING_BACKEND=local` 分支:通过本地编码 sidecar 调用同一实现。
+  **该分支不静默降级**——sidecar 连不上直接抛错,避免把失败伪装成成功。
+- 新增 `DASHSCOPE_RERANK_ENDPOINT_REMOTE`:`DASHSCOPE_RERANK_ENDPOINT` 可指向本地
+  DashScope 兼容重排 shim,远程公共端点单独保留。
+
+### 🧠 检索逻辑
+
+- **CARE 校准门控**:新增 `CARE_GATE_*`(截距、基线间隔、GTE 间隔、top1 一致性)
+  与 `CARE_MARGIN_*` / `CARE_AGREEMENT_*` 标准化参数;重排候选数默认 10 → **20**。
+- **查询意图** `query_intent.py`(`maritime-query-intent-20261021-v1`):
+  确定性的中文海事查询分析(时效线索、同义词组、年份等),供 RAG 与联网搜索共用。
+- **候选策略** `candidate_policy.py`(`candidate-policy-20261021-v1`):
+  本地/联网各 10 个候选、最终证据 5 条、单文档最多 3 块,并统一字符预算。
+- **冲突先验** `conflict_prior.py`(`conflict-prior-20261021-v1`):
+  针对时效性冲突问题的权威性/新鲜度先验,含官方域名白名单。
+- **查询变体**:新增 `query_variants` 与 `SearchVariantTrace`,
+  逐个变体记录 provider、结果数与降级码,便于解释联网结果为何退化。
+
+### 📄 文档处理
+
+- 分块重写:`CHUNK_SIZE` 1024 → **600**、`CHUNK_OVERLAP` 128 → **100**,
+  且重叠部分必须是完整句子。
+- Markdown 表格**整表独立成块**;超过 `CHUNK_MAX_TABLE`(1000)的表格,
+  其后续块会带表头提示(`prefix_hint`),但不改变字符偏移。
+- 新增 `CHUNK_MIN_LENGTH`(500)、尾块合并与切片 `flags` 标记;新增年份过滤。
+
+### 🩺 可观测性
+
+- 新增 `dependency_health.py`:启动时打印依赖摘要;`GET /health` 现在返回
+  `status`(`healthy` / `degraded`)、`ready` 与逐项 `dependencies`。
+- 编码 sidecar 为**必需**(不可用则 `ready=false`);重排 sidecar 为**可选**
+  (不可用时 CARE 回退 AEF,不影响 `ready`)。远程托管端点不在启动时探测。
+
+### ⚙️ 配置
+
+- 新增 `EMBEDDING_BACKEND`、`EMBEDDING_ENDPOINT`、`DASHSCOPE_RERANK_ENDPOINT_REMOTE`、
+  `CARE_GATE_*`、`CARE_MARGIN_*`、`CHUNK_MIN_LENGTH`、`CHUNK_MAX_TABLE`。
+- 新增可选的 `QWEN38_API_KEY` / `QWEN38_BASE_URL` / `QWEN38_MODEL`
+  (Qwen3.8 专用网关;留空时回退到 `DASHSCOPE_*`)。
+
+### ✅ 质量
+
+- **测试隔离**:`conftest.py` 固定 `EMBEDDING_BACKEND=dashscope` 与
+  `RERANK_ENABLED=false`,单元测试不再隐式依赖外部 sidecar
+  (此前 `.env` 的 `EMBEDDING_BACKEND=local` 会让 mock 向量测试真实请求 8765)。
+- 新增测试:`test_candidate_policy`、`test_conflict_prior`、`test_dependency_health`、
+  `test_query_intent`、`test_year_filter`、`test_config_credentials`。
+- `.gitignore` 增加 `._*`:exFAT 会生成 AppleDouble 文件,避免被误提交。
+
+### ⚠️ 破坏性变更
+
+- **分块参数默认值变更**(1024/128 → 600/100):已有 Chroma 索引需重建才能与新分块对齐。
+- **重排候选数 10 → 20**:CARE 的调用量与延迟随之上升,接入前需按本机实测重新评估超时配置。
+- **`EMBEDDING_BACKEND=local` 无降级**:sidecar 未启动时检索直接失败,不再回落到 mock 向量。
+
+---
+
 ## [0.4.0] - 2026-09-19
 
 正式发布。上一个版本为 `v0.3.0`,本版汇总 v0.3.0 之后的全部改动:托管联网搜索、统一引用回溯、自适应检索(AEF)与 CARE 交叉编码器重排,以及三批互不重叠语料的开发/确认实验体系。

@@ -1,13 +1,19 @@
 """可替换的联网搜索 Provider 与统一失败语义。"""
 
-from typing import Protocol
-from urllib.parse import quote
+from typing import Protocol, Sequence
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
 
 from ..core.config import settings
-from ..models.document import SearchOutcome, SearchWarning, WebSearchResult
+from ..models.document import (
+    SearchOutcome,
+    SearchVariantTrace,
+    SearchWarning,
+    WebSearchResult,
+)
+from .query_intent import QueryVariant
 
 
 class SearchProviderError(Exception):
@@ -68,7 +74,9 @@ class TavilySearchAdapter:
             WebSearchResult(
                 title=item.get("title", "").strip(),
                 url=item.get("url", "").strip(),
-                snippet=item.get("content", "").strip()[:1000],
+                snippet=(
+                    item.get("raw_content") or item.get("content") or ""
+                ).strip()[:5000],
                 provider=self.name,
                 score=item.get("score"),
                 published_at=item.get("published_date"),
@@ -163,6 +171,91 @@ class SearchGateway:
                 )
 
         return SearchOutcome(status="failed", warnings=warnings)
+
+    async def search_variants(
+        self,
+        variants: Sequence[QueryVariant],
+        limit: int = 10,
+    ) -> SearchOutcome:
+        """Run each audited query variant, then merge results by canonical URL."""
+        if not variants:
+            return SearchOutcome(status="failed")
+
+        merged: list[WebSearchResult] = []
+        seen: dict[str, int] = {}
+        traces: list[SearchVariantTrace] = []
+        warnings: list[SearchWarning] = []
+        providers: list[str] = []
+        successful = 0
+        degraded = 0
+
+        for variant in variants:
+            outcome = await self.search(variant.text, limit)
+            traces.append(
+                SearchVariantTrace(
+                    query=variant.text,
+                    rule=variant.rule,
+                    status=outcome.status,
+                    provider=outcome.provider,
+                    result_count=len(outcome.results),
+                    warning_codes=[warning.code for warning in outcome.warnings],
+                )
+            )
+            warnings.extend(outcome.warnings)
+            if outcome.provider:
+                providers.append(outcome.provider)
+            if outcome.status == "ok":
+                successful += 1
+            elif outcome.status == "degraded":
+                degraded += 1
+
+            for rank, result in enumerate(outcome.results, start=1):
+                enriched = result.model_copy(
+                    update={
+                        "query_variant": variant.text,
+                        "variant_rule": variant.rule,
+                        "variant_rank": rank,
+                    }
+                )
+                key = self._canonical_url(enriched.url) or enriched.url
+                if key and key in seen:
+                    existing = merged[seen[key]]
+                    if (enriched.variant_rank or 10**9) < (existing.variant_rank or 10**9):
+                        merged[seen[key]] = enriched
+                    continue
+                if key:
+                    seen[key] = len(merged)
+                merged.append(enriched)
+
+        if successful == len(variants):
+            status = "ok"
+        elif successful or degraded:
+            status = "degraded"
+        else:
+            status = "failed"
+        merged.sort(
+            key=lambda result: (
+                result.variant_rank or 10**9,
+                0 if result.variant_rule == "original" else 1,
+                -(result.score or 0.0),
+            )
+        )
+        return SearchOutcome(
+            status=status,
+            provider="+".join(dict.fromkeys(providers)),
+            results=merged,
+            warnings=warnings,
+            query_variants=[variant.text for variant in variants],
+            variant_traces=traces,
+        )
+
+    @staticmethod
+    def _canonical_url(value: str) -> str:
+        if not value:
+            return ""
+        parts = urlsplit(value)
+        path = parts.path.rstrip("/") or "/"
+        return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
 
 
 search_service = SearchGateway(
