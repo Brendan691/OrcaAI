@@ -5,9 +5,13 @@
 浏览网页时一键收藏文章/报告,AI 自动打标签分类,随时用自然语言提问,并拿到**能点回原文的带定位引用**。
 内核与领域无关 —— 航运只是当前加载的一个「领域包」,换包即可服务其他行业。
 
-当前版本 **`v0.4.0`** · 变更见 [CHANGELOG.md](CHANGELOG.md) · 规划见 [ROADMAP.md](ROADMAP.md)
+当前版本 **`v0.5.0`** · 变更见 [CHANGELOG.md](CHANGELOG.md) · 规划见 [ROADMAP.md](ROADMAP.md)
 
 > 🧭 想了解"为什么这么设计",读 [CONTEXT.md](CONTEXT.md)(领域词汇表)与 [docs/adr/](docs/adr/)(0001–0010 架构决策记录)。
+
+![小鲸 OrcaAI v0.5.0 系统架构](docs/images/system-architecture.png)
+
+*左侧是采集与检索生成主链路;右侧是运行时依赖与旁路。编码/重排 sidecar 不可用时的行为在图右下方注明。*
 
 **目录**
 
